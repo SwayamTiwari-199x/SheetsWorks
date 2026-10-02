@@ -32,7 +32,7 @@
       "no tables, text boxes, columns, icons, images, charts",
       "contact info in body (not header/footer)",
       "reverse chronological order",
-      "consistent date format (e.g. 'Jan 2024' or '2024-01'); avoid apostrophe-year dates like '21 and always include the month""
+      "consistent date format (e.g. 'Jan 2024' or '2024-01'); avoid apostrophe-year dates like '21 and always include the month"
     ],
     "misc": { "auto_reject_by_ats": false, "tag_unverified": true }
   },
