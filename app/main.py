@@ -10,14 +10,34 @@ returns `passed: true` unconditionally is worse than no endpoint at all.
 
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import db
 from .models import Profile
 
+logger = logging.getLogger("app.main")
+
 PROFILE_ID = "default"
+
+# This app has no auth (SPEC section 10) and is meant for localhost only. Without
+# a Host check, a malicious web page could point a DNS record at 127.0.0.1 and
+# talk to the app from the browser -- DNS rebinding. CORS does not help: a simple
+# GET carries no preflight, and the browser blocks the *read*, not the request.
+ALLOWED_HOSTS = ["localhost", "127.0.0.1", "[::1]", "testserver"]
+
+# Resume fields are length-capped, but a deeply nested JSON body is not a length
+# problem: ~6KB of "[" trips Python's recursion limit inside pydantic's error
+# reporting, which raises RecursionError and surfaces as a 500 with a traceback.
+# Catch it and answer like any other bad request.
+RECURSION_MESSAGE = (
+    "request body is nested too deeply to validate; "
+    "send a normal JSON object instead"
+)
 
 
 @asynccontextmanager
@@ -35,6 +55,18 @@ app = FastAPI(
     ),
     lifespan=lifespan,
 )
+
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+
+
+@app.middleware("http")
+async def catch_recursion_errors(request, call_next):
+    """Turn a RecursionError from an over-nested body into a 422, not a 500."""
+    try:
+        return await call_next(request)
+    except RecursionError:
+        logger.warning("rejected over-nested body on %s", request.url.path)
+        return JSONResponse(status_code=422, content={"detail": RECURSION_MESSAGE})
 
 
 @app.get("/health")

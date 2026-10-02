@@ -14,6 +14,12 @@ CURRENT STAGE: 2 (Renderers, no AI yet)
 - **Removed out-of-scope routes:** `/versions`, `/jd`, `/applications` (Stage 6/8) and `POST /validate/{version_id}` (Stage 7) — the last returned `passed: true` unconditionally, which would have let Stage 3 wire an export button to a validator that always approves. Their db tables and accessors are gone too. The *models* remain, because Stage 1 explicitly asked for them per SPEC §4.
 - **Removed dead code:** `ConfigError` (defined, exported, never raised), unused `pydantic.Field` import in `config.py`, `_rows_to_models` in `db.py`, unreachable duplicate branch in `_extract_error_message`, and a UTF-8 BOM that a PowerShell edit had introduced into `db.py`.
 - `test_stage1_exposes_only_its_own_routes` now fails if speculative endpoints creep back.
+- **Security pass** (adversarial probe of the live API, all findings fixed + pinned by `tests/test_security.py`, 21 tests):
+  - DNS rebinding: any `Host` header was accepted. Now `TrustedHostMiddleware` allows only localhost/127.0.0.1/[::1]. CORS alone would not help — a simple GET carries no preflight and the browser blocks the read, not the request.
+  - Over-nested JSON (~6KB of `[`) crashed pydantic's error reporting with `RecursionError`, surfacing as **500 + stack trace**. Now caught and answered 422.
+  - Invisible/control characters were stored verbatim: NUL, U+202E RTL override (visually reverses text), zero-width and bidi isolates, BOM, DEL. Rejected with a named code point. Tab/newline still allowed, and accents/Devanagari unaffected.
+  - List fields were unbounded (500 achievements accepted). Capped: 60 entries per list, 12 bullets, 20 links.
+  - Confirmed **not** vulnerable, with tests: SQL injection (all payloads stored inert; queries are parameterised), CORS absent by design, no secret in any API response. HTML and `photo_path` are stored verbatim on purpose — the data is the user's own; Stage 3 must use `textContent`, never `innerHTML`, and a renderer must never open `photo_path`.
 
 ## Commands
 - install: `python -m venv .venv && .venv\Scripts\python -m pip install -r requirements.txt`

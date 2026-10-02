@@ -22,6 +22,24 @@ PRESENT = "Present"
 
 _MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
+# Characters that must never reach a renderer. Tab and newline are allowed
+# because multi-line text is legitimate.
+INVISIBLE = (
+    {chr(c) for c in range(0x00, 0x20)} - {"\t", "\n", "\r"}
+    | {chr(0x7F)}
+    | {chr(c) for c in range(0x80, 0xA0)}              # C1 controls
+    | {chr(c) for c in range(0x200B, 0x2010)}          # zero-width
+    | {chr(c) for c in range(0x202A, 0x202F)}          # bidi overrides
+    | {chr(c) for c in range(0x2066, 0x206A)}          # bidi isolates
+    | {chr(0xFEFF)}                                    # BOM / zero-width nbsp
+)
+
+# A resume has a finite number of entries; unbounded lists are a resource
+# problem, not a feature.
+MAX_LIST = 60
+MAX_BULLETS = 12
+MAX_LINKS = 20
+
 
 def new_id() -> str:
     return uuid.uuid4().hex
@@ -63,6 +81,26 @@ def validate_date_range(start: str, end: str | None) -> None:
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
+    @field_validator("*", mode="after")
+    @classmethod
+    def _reject_invisible_chars(cls, v):
+        """Reject control / invisible characters in any text field.
+
+        They survive JSON happily but are hostile in a rendered document: bidi
+        overrides (U+202E) can visually reverse text, zero-width characters
+        break keyword matching, and NUL and other C0 bytes corrupt PDF output.
+        Rejecting with a clear message beats stripping, because the user
+        cannot see these characters to begin with.
+        """
+        if isinstance(v, str):
+            bad = sorted({f"U+{ord(c):04X}" for c in v if c in INVISIBLE})
+            if bad:
+                raise ValueError(
+                    "contains characters that are invisible or unsafe in a "
+                    f"document: {', '.join(bad)}"
+                )
+        return v
+
 
 # --------------------------------------------------------------------------
 # Contact / shared building blocks
@@ -84,9 +122,9 @@ class Bullet(StrictModel):
     id: str = Field(default_factory=new_id)
     raw_facts: str = Field(default="", max_length=4000)
     text: str = Field(min_length=1, max_length=2000)
-    metrics: list[str] = Field(default_factory=list)
-    tags: list[str] = Field(default_factory=list)
-    tools: list[str] = Field(default_factory=list)
+    metrics: list[str] = Field(default_factory=list, max_length=MAX_LIST)
+    tags: list[str] = Field(default_factory=list, max_length=MAX_LIST)
+    tools: list[str] = Field(default_factory=list, max_length=MAX_LIST)
 
 
 class Contact(StrictModel):
@@ -95,7 +133,7 @@ class Contact(StrictModel):
     phone: str = Field(min_length=5, max_length=40)
     city: str = Field(default="", max_length=120)
     country: str = Field(default="", max_length=120)
-    links: list[Link] = Field(default_factory=list)
+    links: list[Link] = Field(default_factory=list, max_length=MAX_LINKS)
 
     @field_validator("email")
     @classmethod
@@ -118,7 +156,7 @@ class Education(StrictModel):
     start: str
     end: str | None = None
     grade: Grade | None = None
-    coursework: list[str] = Field(default_factory=list)
+    coursework: list[str] = Field(default_factory=list, max_length=MAX_LIST)
     notes: str = ""
 
     @field_validator("start")
@@ -147,7 +185,7 @@ class Experience(StrictModel):
     location: str = Field(default="", max_length=200)
     start: str
     end: str | None = None
-    bullets: list[Bullet] = Field(default_factory=list)
+    bullets: list[Bullet] = Field(default_factory=list, max_length=MAX_BULLETS)
 
     @field_validator("start")
     @classmethod
@@ -171,11 +209,11 @@ class Project(StrictModel):
     id: str = Field(default_factory=new_id)
     name: str = Field(min_length=1, max_length=300)
     role: str = Field(default="", max_length=300)
-    links: list[Link] = Field(default_factory=list)
+    links: list[Link] = Field(default_factory=list, max_length=MAX_LINKS)
     start: str | None = None
     end: str | None = None
-    tech: list[str] = Field(default_factory=list)
-    bullets: list[Bullet] = Field(default_factory=list)
+    tech: list[str] = Field(default_factory=list, max_length=MAX_LIST)
+    bullets: list[Bullet] = Field(default_factory=list, max_length=MAX_BULLETS)
 
     @model_validator(mode="after")
     def _range(self) -> "Project":
@@ -190,7 +228,7 @@ class Project(StrictModel):
 
 class SkillGroup(StrictModel):
     name: str = Field(min_length=1, max_length=120)
-    items: list[str] = Field(default_factory=list)
+    items: list[str] = Field(default_factory=list, max_length=MAX_LIST)
 
 
 class SimpleItem(StrictModel):
@@ -261,14 +299,14 @@ class Profile(StrictModel):
     id: str = Field(default_factory=new_id)
     contact: Contact
     summary: str = Field(default="", max_length=4000)
-    education: list[Education] = Field(default_factory=list)
-    experience: list[Experience] = Field(default_factory=list)
-    projects: list[Project] = Field(default_factory=list)
-    skills: list[SkillGroup] = Field(default_factory=list)
-    certifications: list[SimpleItem] = Field(default_factory=list)
-    achievements: list[SimpleItem] = Field(default_factory=list)
-    extracurriculars: list[SimpleItem] = Field(default_factory=list)
-    publications: list[SimpleItem] = Field(default_factory=list)
+    education: list[Education] = Field(default_factory=list, max_length=MAX_LIST)
+    experience: list[Experience] = Field(default_factory=list, max_length=MAX_LIST)
+    projects: list[Project] = Field(default_factory=list, max_length=MAX_LIST)
+    skills: list[SkillGroup] = Field(default_factory=list, max_length=MAX_LIST)
+    certifications: list[SimpleItem] = Field(default_factory=list, max_length=MAX_LIST)
+    achievements: list[SimpleItem] = Field(default_factory=list, max_length=MAX_LIST)
+    extracurriculars: list[SimpleItem] = Field(default_factory=list, max_length=MAX_LIST)
+    publications: list[SimpleItem] = Field(default_factory=list, max_length=MAX_LIST)
     personal_details: PersonalDetails = Field(default_factory=PersonalDetails)
 
 
