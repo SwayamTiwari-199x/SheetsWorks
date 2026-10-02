@@ -15,7 +15,7 @@ from app.render import build_doc, render_docx, render_pdf, render_txt
 
 
 def contact(**kw) -> dict:
-    base = {"name": "Aditi Sharma", "email": "aditi@example.com", "phone": "+91 98765 43210"}
+    base = {"name": "Dusht", "email": "dusht@example.com", "phone": "+91 98765 43210"}
     base.update(kw)
     return base
 

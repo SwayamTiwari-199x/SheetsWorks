@@ -45,8 +45,8 @@ def test_sample_profile_preserves_special_characters() -> None:
     """SPEC requires & % # _ $ to survive storage intact (Stage 2 renders them)."""
     payload = {
         "contact": {
-            "name": "Aditi Sharma",
-            "email": "aditi@example.com",
+            "name": "Dusht",
+            "email": "dusht@example.com",
             "phone": "+91 98765 43210",
         },
         "experience": [

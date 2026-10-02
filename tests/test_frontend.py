@@ -140,7 +140,20 @@ def test_no_command_is_bound_directly_to_the_mouse(js_code: str) -> None:
 def test_navbar_uses_click_but_types_the_command(js: str) -> None:
     """The navbar may be buttons, but they must dispatch a command, not act."""
     assert "btn.addEventListener('click'" in js
-    assert "runTyped('cd ' + section)" in js
+    assert "runTyped(command)" in js
+
+
+def test_navbar_offers_home_and_quick_actions(js: str) -> None:
+    """Regression: the navbar had no home and nothing but section links."""
+    assert "add('home', 'home'" in js
+    for label in ("notes", "hint", "help", "preview"):
+        assert f"add('{label}'" in js, f"navbar is missing {label}"
+    assert "notesCount()" in js, "navbar should show how many notes exist"
+
+
+def test_navbar_buttons_carry_their_command_as_a_title(js: str) -> None:
+    """Hover text without a hover handler, so a mouse user can still read them."""
+    assert "btn.title = command" in js
 
 
 def test_mouseup_only_restores_focus(js_code: str) -> None:
@@ -287,7 +300,7 @@ def test_nosniff_on_everything() -> None:
 def test_preview_renders_the_sent_profile() -> None:
     with TestClient(app) as c:
         r = c.post("/preview", json={
-            "contact": {"name": "Aditi", "email": "a@b.com", "phone": "12345"},
+            "contact": {"name": "Dusht", "email": "a@b.com", "phone": "12345"},
             "summary": "Engineer.",
             "experience": [{
                 "org": "PayFlow", "role": "Backend", "start": "2022-01", "end": "Present",

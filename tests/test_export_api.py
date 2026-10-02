@@ -43,8 +43,8 @@ def test_export_pdf_is_a_real_pdf(client: TestClient, seeded: str) -> None:
     assert r.content.startswith(b"%PDF")
     with pdfplumber.open(io.BytesIO(r.content)) as doc:
         text = "\n".join(p.extract_text() or "" for p in doc.pages)
-    assert "Aditi Sharma" in text
-    assert "aditi.sharma@example.com" in text
+    assert "Dusht" in text
+    assert "dusht@example.com" in text
 
 
 def test_export_pdf_reports_page_count_and_limit(client: TestClient, seeded: str) -> None:
@@ -70,19 +70,19 @@ def test_experienced_limit_is_two_pages(client: TestClient, seeded: str) -> None
 def test_export_docx_opens_with_python_docx(client: TestClient, seeded: str) -> None:
     r = client.post(f"/export/{seeded}", params={"format": "docx"})
     d = DocxDocument(io.BytesIO(r.content))
-    assert any("Aditi Sharma" in p.text for p in d.paragraphs)
+    assert any("Dusht" in p.text for p in d.paragraphs)
 
 
 def test_export_txt_is_plain_text(client: TestClient, seeded: str) -> None:
     r = client.post(f"/export/{seeded}", params={"format": "txt"})
-    assert "Aditi Sharma" in r.text
+    assert "Dusht" in r.text
     assert "\x00" not in r.text
 
 
 def test_export_filename_is_sanitised(client: TestClient, seeded: str) -> None:
     """The name reaches a Content-Disposition header, so it must be inert."""
     client.put("/profile", json={"contact": {
-        "name": "Aditi Sharma", "email": "a@b.com", "phone": "12345"}})
+        "name": "Dusht", "email": "a@b.com", "phone": "12345"}})
     v = client.post("/versions/from-profile", params={"name": 'evil"; rm -rf / #.txt'}).json()
     r = client.post(f"/export/{v['id']}", params={"format": "txt"})
     disp = r.headers["content-disposition"]

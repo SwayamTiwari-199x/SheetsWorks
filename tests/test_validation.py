@@ -13,8 +13,8 @@ from app.models import Profile
 def _minimal(**overrides) -> dict:
     payload = {
         "contact": {
-            "name": "Aditi Sharma",
-            "email": "aditi@example.com",
+            "name": "Dusht",
+            "email": "dusht@example.com",
             "phone": "+91 98765 43210",
         }
     }

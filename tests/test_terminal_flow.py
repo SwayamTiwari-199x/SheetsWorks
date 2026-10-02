@@ -191,7 +191,7 @@ def has(res: dict, needle: str, cls: str | None = None) -> bool:
 
 
 BASE = {
-    "contact": {"name": "Aditi Sharma", "email": "a@b.com", "phone": "12345"},
+    "contact": {"name": "Dusht", "email": "a@b.com", "phone": "12345"},
     "summary": {"text": "Backend engineer."},
     "education": [],
     "experience": [
@@ -278,12 +278,128 @@ def test_add_is_equivalent_to_a_bare_field() -> None:
 
 
 def test_appenders_accumulate() -> None:
-    r = drive(
-        ["draft experience", "org Acme", "bullet One.", "bullet Two.", "done", "save"],
-        BASE,
-    )
+    r = drive(["draft experience", "org Acme", "bullet One.", "bullet Two.", "done", "save"],
+              BASE)
     entry = [e for e in r["profile"]["experience"] if e["org"] == "Acme"][0]
-    assert entry["bullets"] == ["One.", "Two."]
+    assert [b["text"] for b in entry["bullets"]] == ["One.", "Two."]
+
+
+def test_bullets_are_objects_like_the_api_expects() -> None:
+    """Regression: bullets came back as strings and the server would 422.
+
+    The API models a bullet as {raw_facts, text, metrics, tags, tools}. Writing a
+    bare string produced a payload the server rejects, and printing one showed
+    "[object Object]".
+    """
+    r = drive(["draft experience", "org Acme", "bullet Cut latency by 40%.", "done", "save"],
+              BASE)
+    entry = [e for e in r["profile"]["experience"] if e["org"] == "Acme"][0]
+    bullet = entry["bullets"][0]
+    assert isinstance(bullet, dict), f"expected an object, got {type(bullet).__name__}"
+    assert bullet["text"] == "Cut latency by 40%."
+    assert bullet["raw_facts"] == "Cut latency by 40%."
+    for key in ("metrics", "tags", "tools"):
+        assert bullet[key] == []
+
+
+def test_cat_prints_object_bullets_as_text() -> None:
+    """Regression: `cat` rendered bullets as '[object Object]'."""
+    server_shape = json.loads(json.dumps(BASE))
+    server_shape["experience"][0]["bullets"] = [
+        {"id": "b1", "raw_facts": "900->240",
+         "text": "Cut p99 latency from 900ms to 240ms with Redis.",
+         "metrics": [], "tags": [], "tools": ["Redis"]},
+    ]
+    r = drive(["cat experience"], server_shape)
+    assert has(r, "Cut p99 latency from 900ms to 240ms with Redis.")
+    assert not any("[object Object]" in ln for ln in r["lines"])
+
+
+def test_appending_to_existing_object_bullets_keeps_the_shape() -> None:
+    """`edit 1 bullet X` adds a bullet; it must not corrupt the existing ones."""
+    server_shape = json.loads(json.dumps(BASE))
+    server_shape["experience"][0]["bullets"] = [
+        {"id": "b1", "raw_facts": "x", "text": "Existing bullet.",
+         "metrics": [], "tags": [], "tools": []},
+    ]
+    r = drive(["cd experience", "edit 1 bullet Added bullet.", "save"], server_shape)
+    entry = r["profile"]["experience"][0]
+    assert len(entry["bullets"]) == 2
+    assert all(isinstance(b, dict) for b in entry["bullets"])
+    assert entry["bullets"][0]["text"] == "Existing bullet."
+    assert entry["bullets"][1]["text"] == "Added bullet."
+
+
+# --- dot notation: fixing one bullet without losing the entry ------------
+
+
+def _two_bullet_entry():
+    shape = json.loads(json.dumps(BASE))
+    shape["experience"][0]["bullets"] = [
+        {"id": "b1", "raw_facts": "900->240",
+         "text": "Cut p99 latency from 900ms to 240ms.", "metrics": [], "tags": [], "tools": []},
+        {"id": "b2", "raw_facts": "11->15",
+         "text": "Migrated Postgres 11 to 15.", "metrics": [], "tags": [], "tools": []},
+    ]
+    return shape
+
+
+def test_edit_dotted_replaces_a_single_bullet() -> None:
+    """Regression: there was no way to fix a typo in one bullet."""
+    r = drive(["cd experience", "edit 1.1 Rewritten first bullet.", "save"], _two_bullet_entry())
+    entry = r["profile"]["experience"][0]
+    assert entry["bullets"][0]["text"] == "Rewritten first bullet."
+    assert entry["bullets"][0]["raw_facts"] == "900->240", "original facts must survive"
+    assert entry["bullets"][1]["text"] == "Migrated Postgres 11 to 15."
+    assert len(entry["bullets"]) == 2
+
+
+def test_rm_dotted_deletes_a_single_bullet() -> None:
+    r = drive(["cd experience", "rm 1.2", "save"], _two_bullet_entry())
+    entry = r["profile"]["experience"][0]
+    assert len(entry["bullets"]) == 1
+    assert entry["bullets"][0]["text"] == "Cut p99 latency from 900ms to 240ms."
+    assert len(r["profile"]["experience"]) == 2, "the entry itself must survive"
+
+
+def test_rm_dotted_out_of_range_explains() -> None:
+    r = drive(["cd experience", "rm 1.9", "save"], _two_bullet_entry())
+    assert has(r, "has 2 bullets, not 9")
+    assert len(r["profile"]["experience"][0]["bullets"]) == 2
+
+
+def test_dotted_operations_are_undoable() -> None:
+    r = drive(["cd experience", "rm 1.1", "save", "undo", "save"], _two_bullet_entry())
+    assert len(r["profile"]["experience"][0]["bullets"]) == 2
+
+
+def test_dotted_edit_works_on_string_bullets() -> None:
+    legacy = json.loads(json.dumps(BASE))
+    legacy["experience"][0]["bullets"] = ["First.", "Second."]
+    r = drive(["cd experience", "edit 1.2 Changed.", "save"], legacy)
+    assert r["profile"]["experience"][0]["bullets"][1] == "Changed."
+
+
+def test_help_rm_documents_dot_notation() -> None:
+    r = drive(["help rm"], BASE)
+    assert has(r, "rm <n>.<m>")
+    assert has(r, "rm 1.2")
+
+
+def test_string_bullets_still_work_for_legacy_data() -> None:
+    """Older profiles may hold plain strings; do not break them."""
+    legacy = json.loads(json.dumps(BASE))
+    legacy["experience"][0]["bullets"] = ["A plain string bullet."]
+    r = drive(["cat experience"], legacy)
+    assert has(r, "A plain string bullet.")
+    assert not any("[object Object]" in ln for ln in r["lines"])
+
+
+def test_courses_and_tech_stay_plain_strings() -> None:
+    r = drive(["draft education", "institution X", "course Databases", "done", "save"], BASE)
+    assert r["profile"]["education"][0]["coursework"] == ["Databases"]
+    r2 = drive(["draft projects", "name P", "tech Python", "done", "save"], BASE)
+    assert r2["profile"]["projects"][0]["tech"] == ["Python"]
 
 
 def test_grade_and_scale_combine() -> None:
@@ -424,7 +540,7 @@ def test_grep_with_no_match() -> None:
 
 def test_profile_summary_lists_sections() -> None:
     r = drive(["profile"], BASE)
-    assert has(r, "Aditi Sharma")
+    assert has(r, "Dusht")
     assert has(r, "experience")
 
 
@@ -508,6 +624,265 @@ def test_export_rejects_a_bad_format() -> None:
     assert has(r, "format must be one of")
 
 
-def test_startup_against_an_empty_db_offers_a_draft() -> None:
-    r = drive(["ls"])
-    assert has(r, "no profile yet")
+def test_startup_against_an_empty_db_welcomes_and_orients() -> None:
+    """A new user must be told what to type, not just handed an error."""
+    r = drive(["pwd"])
+    assert has(r, "Welcome")
+    assert has(r, "home")
+    assert has(r, "setup contact")
+    assert has(r, "demo")
+
+
+def test_home_lists_every_section_with_status() -> None:
+    r = drive(["home"], BASE)
+    assert has(r, "your resume, as a set of sections")
+    assert has(r, "section")
+    assert has(r, "filled")
+    assert has(r, "empty")
+
+
+def test_home_tells_you_where_to_start_when_empty() -> None:
+    empty = json.loads(json.dumps(BASE))
+    for k in ("education", "experience", "projects", "skills",
+              "certifications", "achievements"):
+        empty[k] = []
+    r = drive(["home"], empty)
+    assert has(r, "start here:")
+    assert has(r, "draft experience")
+
+
+def test_home_reports_zero_for_an_empty_singleton() -> None:
+    """An empty contact is 0 entries, not 1 -- otherwise `home` lies."""
+    empty = json.loads(json.dumps(BASE))
+    empty["contact"] = {"name": "", "email": "", "phone": ""}
+    r = drive(["home"], empty)
+    line = [ln for ln in r["lines"] if "contact" in ln and "empty" in ln]
+    assert line, "contact row missing"
+    assert " 0 " in line[0] or line[0].split()[-2] == "0", line[0]
+def test_home_is_where_cd_without_argument_goes() -> None:
+    r = drive(["cd contact", "cd"], BASE)
+    assert has(r, "your resume, as a set of sections")
+
+
+# --- the intuition fix -----------------------------------------------------
+
+
+def test_cd_explains_the_section_and_gives_the_next_command() -> None:
+    """Regression: clicking a navbar section left you with nothing to do."""
+    empty = json.loads(json.dumps(BASE))
+    empty["contact"] = {"name": "", "email": "", "phone": ""}
+    r = drive(["cd contact"], empty)
+    assert has(r, "How employers reach you")
+    assert has(r, "next: draft contact")
+    assert has(r, "then type name / email / phone")
+
+
+def test_cd_on_a_populated_section_shows_the_alternatives() -> None:
+    r = drive(["cd experience"], BASE)
+    assert has(r, "entries here")
+    assert has(r, "cat experience")
+    assert has(r, "draft experience")
+
+
+def test_cd_offers_reorder_and_delete_hints_for_list_sections() -> None:
+    r = drive(["cd experience"], BASE)
+    assert has(r, "mv 1 down")
+    assert has(r, "rm 1")
+
+
+def test_cd_offers_edit_for_single_value_sections() -> None:
+    r = drive(["cd contact"], BASE)
+    assert has(r, "edit contact")
+
+
+def test_cd_unknown_section_suggests_home() -> None:
+    r = drive(["cd nowhere"], BASE)
+    assert has(r, "no such section")
+    assert has(r, "home")
+
+
+def test_cat_explains_the_section() -> None:
+    r = drive(["cat contact"], BASE)
+    assert has(r, "How employers reach you")
+
+
+def test_cat_on_empty_section_says_how_to_start() -> None:
+    empty = json.loads(json.dumps(BASE))
+    empty["projects"] = []
+    r = drive(["cat projects"], empty)
+    assert has(r, "nothing here yet")
+    assert has(r, "draft projects")
+
+
+def test_cat_with_no_argument_explains_usage() -> None:
+    r = drive(["cat"], BASE)
+    assert has(r, "which section?")
+    assert has(r, "cat experience")
+
+
+def test_cat_shows_entries_and_how_to_change_them() -> None:
+    r = drive(["cd experience", "cat"], BASE)
+    assert has(r, "Backend")
+    assert has(r, "edit 1")
+
+
+# --- setup ----------------------------------------------------------------
+
+
+def test_setup_without_argument_explains_every_section() -> None:
+    r = drive(["setup"], BASE)
+    assert has(r, "setup contact")
+    assert has(r, "setup experience")
+
+
+def test_setup_opens_a_draft() -> None:
+    r = drive(["setup experience"], BASE)
+    assert has(r, "~/experience")
+    assert has(r, "drafting experience")
+    assert has(r, "org / role")
+
+
+def test_setup_typo_suggests() -> None:
+    r = drive(["setup experiance"], BASE)
+    assert has(r, "no such section")
+    assert has(r, "did you mean `setup experience`")
+
+
+# --- notes scratchpad -----------------------------------------------------
+
+
+def test_note_adds_and_lists() -> None:
+    r = drive(["note cut latency from 900ms to 240ms", "note led a team of 5", "notes"])
+    assert has(r, "noted (1 total)", "ok")
+    assert has(r, "noted (2 total)", "ok")
+    assert has(r, "cut latency from 900ms to 240ms")
+    assert has(r, "led a team of 5")
+    assert has(r, "notes  (2)")
+
+
+def test_notes_when_empty_explains_itself() -> None:
+    r = drive(["notes"], BASE)
+    assert has(r, "no notes yet")
+    assert has(r, "note cut p99 latency")
+
+
+def test_note_rm_deletes_one() -> None:
+    r = drive(["note first thing", "note second thing", "note rm 1", "notes"])
+    assert has(r, "deleted: first thing", "ok")
+    # ignore the echoed command lines and the deletion message itself
+    body = [ln for ln in r["lines"] if not ln.startswith("[line cmd]")
+            and "deleted:" not in ln]
+    assert not any("first thing" in ln for ln in body)
+    assert any("second thing" in ln for ln in body)
+
+
+def test_note_rm_out_of_range() -> None:
+    r = drive(["note only one", "note rm 5"])
+    assert has(r, "no note 5")
+
+
+def test_note_clear() -> None:
+    r = drive(["note a", "note b", "note clear", "notes"])
+    assert has(r, "notes cleared")
+    assert has(r, "no notes yet")
+
+
+def test_notes_never_touch_the_profile() -> None:
+    """Notes are raw material, not resume content."""
+    r = drive(["note something secret", "save"], BASE)
+    blob = json.dumps(r["profile"])
+    assert "secret" not in blob
+
+
+def test_note_alias_works() -> None:
+    r = drive(["note via alias"], BASE)
+    assert has(r, "noted (1 total)", "ok")
+
+
+# --- demo -----------------------------------------------------------------
+
+
+def test_demo_loads_a_sample_when_empty() -> None:
+    r = drive(["demo"], None)
+    assert has(r, "loaded a sample resume", "ok")
+    assert has(r, "replace it with your own")
+    assert r["profile"]["contact"]["name"] == "Dusht"
+    assert r["profile"]["experience"]
+
+
+def test_demo_refuses_to_clobber_real_data() -> None:
+    r = drive(["demo"], BASE)
+    assert has(r, "would replace the profile")
+    assert has(r, "demo --force")
+    assert r["profile"]["contact"]["name"] == "Dusht" or "Dusht" in json.dumps(r["profile"])
+
+
+def test_demo_refusal_leaves_the_profile_alone() -> None:
+    r = drive(["demo"], BASE)
+    assert r["profile"]["experience"][0]["org"] == "PayFlow", "must not be overwritten"
+
+
+def test_demo_force_overwrites() -> None:
+    r = drive(["demo --force"], BASE)
+    assert has(r, "loaded a sample resume", "ok")
+    assert r["profile"]["contact"]["name"] == "Dusht"
+
+
+def test_demo_is_undoable() -> None:
+    r = drive(["demo --force", "save", "undo", "save"], BASE)
+    assert r["profile"]["experience"][0]["org"] == "PayFlow"
+
+
+def test_sample_data_is_clearly_fake() -> None:
+    r = drive(["demo"], None)
+    blob = json.dumps(r["profile"])
+    assert "example.com" in blob, "sample must use a reserved example domain"
+
+
+def test_reset_requires_force() -> None:
+    r = drive(["reset"], BASE)
+    assert has(r, "empties your profile")
+    assert r["profile"]["experience"], "must not have reset"
+
+
+def test_reset_force_empties() -> None:
+    r = drive(["reset --force"], BASE)
+    assert has(r, "profile cleared")
+    assert r["profile"]["experience"] == []
+
+
+def test_reset_is_undoable() -> None:
+    r = drive(["reset --force", "save", "undo", "save"], BASE)
+    assert len(r["profile"]["experience"]) == 2
+
+
+# --- help -----------------------------------------------------------------
+
+
+def test_help_covers_the_new_commands() -> None:
+    r = drive(["help"], BASE)
+    for cmd in ("home", "setup", "demo", "notes", "cat", "reset"):
+        assert has(r, cmd), f"help does not mention {cmd}"
+
+
+def test_every_command_has_a_help_topic() -> None:
+    """Nobody should hit a command with `help <cmd>` saying 'no help topic'."""
+    for cmd in ("home", "setup", "ls", "cd", "cat", "pwd", "notes", "note",
+                "demo", "reset", "draft", "edit", "rm", "mv", "export",
+                "theme", "undo", "preview", "grep", "hint", "profile", "clear",
+                "help"):
+        got = drive(["help " + cmd], BASE)
+        assert not has(got, "no help topic"), f"no help topic for {cmd}"
+
+
+def test_help_help_lists_every_topic() -> None:
+    r = drive(["help help"], BASE)
+    assert has(r, "Topics:")
+    for topic in ("home", "setup", "cat", "notes", "demo", "reset"):
+        assert has(r, topic), f"topic list omits {topic}"
+
+
+def test_help_cat_is_written_for_a_beginner() -> None:
+    r = drive(["help cat"], BASE)
+    assert has(r, "read a section back in full")
+    assert has(r, "If the section is empty")

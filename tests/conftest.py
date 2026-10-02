@@ -64,14 +64,14 @@ def sample_profile_payload() -> dict:
     return Profile.model_validate(
         {
             "contact": {
-                "name": "Aditi Sharma",
-                "email": "aditi.sharma@example.com",
+                "name": "Dusht",
+                "email": "dusht@example.com",
                 "phone": "+91 98765 43210",
                 "city": "Bengaluru",
                 "country": "India",
                 "links": [
-                    {"label": "GitHub", "url": "https://github.com/aditi"},
-                    {"label": "LinkedIn", "url": "https://linkedin.com/in/aditi"},
+                    {"label": "GitHub", "url": "https://github.com/dusht"},
+                    {"label": "LinkedIn", "url": "https://linkedin.com/in/dusht"},
                 ],
             },
             "summary": (
@@ -120,7 +120,7 @@ def sample_profile_payload() -> dict:
                 {
                     "name": "Staffing Scheduler",
                     "role": "Solo build",
-                    "links": [{"label": "GitHub", "url": "https://github.com/aditi/scheduler"}],
+                    "links": [{"label": "GitHub", "url": "https://github.com/dusht/scheduler"}],
                     "start": "2021-01",
                     "end": "2021-06",
                     "tech": ["FastAPI", "Postgres", "Celery"],
