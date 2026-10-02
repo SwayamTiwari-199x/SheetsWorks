@@ -11,7 +11,6 @@ from app.config import (
     DEFAULT_PROVIDER,
     OPENAI_COMPAT_BASE_URLS,
     PROVIDERS,
-    ConfigError,
     Settings,
 )
 
@@ -88,7 +87,3 @@ def test_real_env_is_not_read_by_settings(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setenv("LLM_PROVIDER", "groq")
     monkeypatch.delenv("LLM_PROVIDER")
     assert Settings(_env_file=None).llm_provider == DEFAULT_PROVIDER
-
-
-def test_config_error_is_exported() -> None:
-    assert issubclass(ConfigError, RuntimeError)

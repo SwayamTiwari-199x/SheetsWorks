@@ -10,7 +10,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Provider = Literal["gemini", "groq", "mistral", "anthropic"]
@@ -44,10 +44,6 @@ API_KEY_VARS: dict[Provider, str] = {
     "mistral": "MISTRAL_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
 }
-
-
-class ConfigError(RuntimeError):
-    """Raised when the environment is not usable."""
 
 
 class Settings(BaseSettings):

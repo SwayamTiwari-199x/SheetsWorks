@@ -3,7 +3,9 @@
     "generated_at": "2026-10-02",
     "source_doc": "RULES.md",
     "source_count": 75,
-    "notes": "All rules carry sources and verified/unverified tags in RULES.md. refresh_market_data task: re-run market searches every ~3 months."
+    "source_domain_count": 56,
+    "source_count_method": "distinct URLs cited in RULES.md, trailing punctuation trimmed; 85 citations total, 9 URLs cited twice against two different rules. See RULES.md header.",
+    "notes": "All rules carry sources and verified/unverified tags in RULES.md. Market data freshness is tracked in market_snapshot.stale_after, not prose."
   },
   "recruiter_behavior": {
     "initial_scan_seconds": { "median_estimate": 7.4, "range": [5, 30], "tag": "verified" },
@@ -125,7 +127,10 @@
   },
   "market_snapshot": {
     "date": "2026-10-02",
-    "stale_warning": "STALE after ~3 months. refresh_market_data task required.",
+    "stale_after_days": 90,
+    "stale_after": "2027-01-02",
+    "refresh_task": "refresh_market_data",
+    "stale_warning": "Machine-checkable: compare today against stale_after. If today > stale_after, this block is stale and must be re-researched before it is shown to the user.",
     "india_in_demand": ["AI/ML", "cloud", "data science/analytics", "cybersecurity", "automation", "Python", "TensorFlow", "PyTorch"],
     "global_trends": ["software eng listings +30% in 2026", "AI-skill roles pay 43% more", "new-grad big-tech hiring below 2019 levels", "top listed AI skills: LangChain, RAG, PyTorch"],
     "tag": "verified_india / unverified_global"

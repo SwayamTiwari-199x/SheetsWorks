@@ -104,8 +104,6 @@ def _extract_error_message(body: Any) -> str:
             err = payload.get("error", payload)
             if isinstance(err, dict) and err.get("message"):
                 return str(err["message"])
-            if isinstance(err, dict) and err.get("message"):
-                return str(err["message"])
     except Exception:
         pass
     return ""

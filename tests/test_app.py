@@ -29,3 +29,19 @@ def test_openapi_schema_builds() -> None:
     schema = resp.json()
     assert "/profile" in schema["paths"]
     assert {"get", "put"} <= set(schema["paths"]["/profile"])
+
+
+def test_stage1_exposes_only_its_own_routes() -> None:
+    """Stage 1 scope: /health + /profile. Later stages add their own routes.
+
+    Guards against re-introducing speculative endpoints — in particular
+    `/validate/{version_id}`, which used to return passed=true unconditionally.
+    """
+    with TestClient(app) as client:
+        paths = set(client.get("/openapi.json").json()["paths"])
+    assert paths == {"/health", "/profile"}
+
+
+def test_validate_stub_is_gone() -> None:
+    with TestClient(app) as client:
+        assert client.post("/validate/anything").status_code == 404

@@ -6,6 +6,16 @@ Every rule carries: source URL, date accessed, and a `verified`/`unverified` tag
 
 Date accessed for ALL sources: **2026-10-02**, unless noted.
 
+Counting method for `rules.json` `meta.source_count`: distinct URLs cited in this
+file, after trimming trailing sentence punctuation. **75 distinct URLs across 56
+distinct domains** (85 total citations; 9 URLs are cited twice because they
+support two different rules). To re-verify after any edit:
+
+```powershell
+$t = Get-Content RULES.md -Raw
+([regex]::Matches($t,'https?://[^\s;)]+') | ForEach-Object { $_.Value -replace '\.$','' } | Sort-Object -Unique).Count
+```
+
 This file is the origin of truth for ATS/layout/writing conventions in this app. "Refresh market data" task noted in §8.
 
 ---
@@ -112,9 +122,9 @@ Do NOT build detector evasion (per SPEC). The research justifies this:
   SOURCE: https://careerbldr.com/blog/ai-resume-detection-hiring-managers/ — `unverified`
 - **Therefore the app's position:** the defense is (a) the user's own specific facts, numbers, and vocabulary, and (b) human review of every bullet — both already in the SPEC. No detector-tricks, ever.
 
-## 8. Job market snapshot (STALE — refresh regularly)
+## 8. Job market snapshot (fresh as of 2026-10-02; expires 2027-01-02)
 
-> **`refresh_market_data` task:** re-run this section's searches every ~3 months. Everything below was gathered 2026-10-02 and WILL go stale.
+> **`refresh_market_data` task:** this block expires on **2027-01-02** (90 days after collection). The date is machine-readable in `rules.json` as `market_snapshot.stale_after`; re-run this section's searches after that. Do not show these figures to the user once the date has passed.
 
 **India (2026):**
 - In-demand: AI/ML, cloud, data science/analytics, cybersecurity, automation. —
