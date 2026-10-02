@@ -68,7 +68,7 @@ Key point: each bullet stores **`raw_facts` (what the user actually said) and `t
 ## 6. Tech stack
 - Python 3.11+, **FastAPI**, SQLite (via SQLModel or plain sqlite3), pydantic.
 - Frontend: **single-page, no build step** (plain HTML + small vanilla JS or htmx). No React unless needed.
-- LLM: Anthropic API (key in `.env`). One `llm.py` wrapper with: JSON-schema output, retry-once on invalid JSON, a model-name config, request logging to file for debugging.
+- LLM: **provider-agnostic**, chosen by `LLM_PROVIDER` = `gemini` | `groq` | `mistral` | `anthropic` (key in `.env`). One `llm.py` wrapper with a single `ask(schema, prompt)` surface: schema goes **in the prompt** (no provider-specific JSON modes), response parsed then validated with pydantic, retry once on invalid JSON, then raise `LLMError`. Gemini/Groq/Mistral share one OpenAI-compatible `httpx` path; Anthropic gets its own branch. `--check-llm` CLI sends a tiny JSON-schema test call and prints pass/fail.
 - Rendering: Jinja2, Tectonic (LaTeX→PDF), python-docx, pdfplumber (for ATS lint text extraction).
 - Run: `uvicorn app.main:app --reload`, open `localhost:8000`.
 

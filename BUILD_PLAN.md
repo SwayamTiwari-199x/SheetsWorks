@@ -14,12 +14,13 @@ Order rationale: research and schema come first because everything depends on th
 - Includes the honest section on AI-detection and recruiter attitude.
 
 ## Stage 1 — Scaffold, schema, storage
-**Prompt:** "Do Stage 1. Create the FastAPI project, pydantic models for Profile/Version/JobDescription/Application exactly per SPEC section 4, SQLite storage, `GET/PUT /profile`, config via `.env`, and the `llm.py` wrapper (JSON-schema output, retry once, logging). Add pytest tests."
+**Prompt:** "Do Stage 1. Create the FastAPI project, pydantic models for Profile/Version/JobDescription/Application exactly per SPEC section 4, SQLite storage, `GET/PUT /profile`, config via `.env` including `LLM_PROVIDER` (gemini|groq|mistral|anthropic), and the `llm.py` wrapper: single `ask(schema, prompt)` surface, schema embedded in the prompt (no provider-specific JSON modes), one OpenAI-compatible `httpx` path for gemini/groq/mistral plus a separate Anthropic branch, parse + pydantic validate, retry once, then raise `LLMError`. Add a `--check-llm` command (tiny JSON-schema test call, prints pass/fail), pytest in requirements, and `.gitignore` for `.env`, `logs/`, `*.db`, venv. Add pytest tests; all LLM tests mocked, no real key needed."
 **Acceptance:**
 - App starts; `/docs` loads.
 - PUT then GET a sample profile round-trips unchanged.
 - Invalid profile (missing name, bad date) is rejected with a clear error.
 - `llm.py` test with a mocked client: invalid JSON triggers exactly one retry, then raises.
+- `--check-llm` reports pass/fail against each of the four providers using a mocked client.
 
 ## Stage 2 — Renderers (no AI yet)
 **Prompt:** "Do Stage 2. Build renderers: profile/version JSON → ATS-safe PDF (Tectonic via Jinja2 LaTeX template; if Tectonic can't be installed, use HTML→PDF with WeasyPrint and tell me), DOCX (python-docx), TXT. Single column, standard headings from rules.json, escape LaTeX special characters. Add `POST /export/{version_id}`."

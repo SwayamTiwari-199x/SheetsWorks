@@ -2,7 +2,7 @@
   "meta": {
     "generated_at": "2026-10-02",
     "source_doc": "RULES.md",
-    "source_count": 30,
+    "source_count": 75,
     "notes": "All rules carry sources and verified/unverified tags in RULES.md. refresh_market_data task: re-run market searches every ~3 months."
   },
   "recruiter_behavior": {
@@ -32,7 +32,7 @@
       "no tables, text boxes, columns, icons, images, charts",
       "contact info in body (not header/footer)",
       "reverse chronological order",
-      "consistent date format (e.g. 'Jan 2024' or '2024-01'); avoid apostrophe-year dates like '21 and always include the month"
+      "consistent date format (e.g. 'Jan 2024' or '2024-01'); avoid apostrophe-year shorthand like '21; always include the month"
     ],
     "misc": { "auto_reject_by_ats": false, "tag_unverified": true }
   },

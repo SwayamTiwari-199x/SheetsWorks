@@ -3,7 +3,7 @@
 CURRENT STAGE: 1 (Scaffold, schema, storage)
 
 ## Done
-- Stage 0 (accepted): `RULES.md` + `rules.json` written (~40 distinct source URLs cited; rules.json parses). Post-acceptance fixes: layout_rule clarity on apostrophe-year dates, bullet word min aligned at 15, §0 AI-detector line reworded to "rarely, per limited evidence", SPEC.md now has per-version `include_personal_details` toggle and verified-blocks/unverified-warns validator rule.
+- Stage 0 (accepted): `RULES.md` + `rules.json` written (75 distinct source URLs cited; rules.json parses). Post-acceptance fixes: SPEC.md has per-version `include_personal_details` toggle (default off) plus verified-blocks/unverified-warns validator rule; `rules.json` bullet min 15 aligned with RULES.md §4; §0 detector line reworded to "rarely, per limited evidence"; `meta.source_count` corrected 30 → 75.
 
 ## Notes / decisions
 - rules.json is a summary of RULES.md; RULES.md is prose-of-truth with sources. App code reads rules.json.
