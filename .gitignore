@@ -1,0 +1,33 @@
+# secrets
+.env
+.env.*
+!.env.example
+
+# app data
+*.db
+*.db-wal
+*.db-shm
+logs/
+
+# python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# venv
+.venv/
+venv/
+env/
+
+# editors / os
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# build output
+dist/
+build/
+*.egg-info/
