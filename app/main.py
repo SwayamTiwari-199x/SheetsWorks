@@ -1,11 +1,13 @@
 """FastAPI app.
 
-Stage 1 scope only: `/docs`, a health check, and `GET/PUT /profile`.
+Stage 1: `/docs`, `/health`, `GET/PUT /profile`.
+Stage 2: `POST /versions`, `POST /versions/from-profile`, `POST /export/{version_id}`.
 
-Deliberately absent: `/versions`, `/jd`, `/applications` (Stage 6/8) and
-`/validate/{version_id}` (Stage 7). They are re-added by the stage that
-actually needs them rather than stubbed here — a validator endpoint that
-returns `passed: true` unconditionally is worse than no endpoint at all.
+Deliberately absent: `/assist/*` (Stage 4), `/jd/*` (Stage 5), `/tailor`
+(Stage 6), `/validate/{version_id}` (Stage 7) and `/applications` (Stage 8).
+They are re-added by the stage that actually needs them rather than stubbed
+here — a validator endpoint that returns `passed: true` unconditionally is
+worse than no endpoint at all.
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ import logging
 import re
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse, Response
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -37,6 +39,16 @@ PROFILE_ID = "default"
 # GET carries no preflight, and the browser blocks the *read*, not the request.
 ALLOWED_HOSTS = ["localhost", "127.0.0.1", "[::1]", "testserver"]
 
+# Sent on every response. nosniff matters as soon as Stage 3 serves the profile
+# back over HTTP: without it a browser may sniff a JSON response as HTML and run
+# it. The CSP is deny-all because no API response is ever meant to be a document.
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "X-Frame-Options": "DENY",
+    "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
+}
+
 # Resume fields are length-capped, but a deeply nested JSON body is not a length
 # problem: ~6KB of "[" trips Python's recursion limit inside pydantic's error
 # reporting, which raises RecursionError and surfaces as a 500 with a traceback.
@@ -45,6 +57,14 @@ RECURSION_MESSAGE = (
     "request body is nested too deeply to validate; "
     "send a normal JSON object instead"
 )
+
+# Request paths are attacker-controlled and %0A decodes to a newline, so an
+# unsanitised path in a log line would let a caller forge log entries.
+_LOG_UNSAFE = re.compile(r"[^\x20-\x7e]")
+
+
+def _log_safe(value: str) -> str:
+    return _LOG_UNSAFE.sub("?", value)[:200]
 
 
 @asynccontextmanager
@@ -67,13 +87,19 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
 
 
 @app.middleware("http")
-async def catch_recursion_errors(request, call_next):
-    """Turn a RecursionError from an over-nested body into a 422, not a 500."""
+async def security_and_recursion(request, call_next):
+    """Attach hardening headers and turn an over-nested body into a 422."""
     try:
-        return await call_next(request)
+        response = await call_next(request)
     except RecursionError:
-        logger.warning("rejected over-nested body on %s", request.url.path)
-        return JSONResponse(status_code=422, content={"detail": RECURSION_MESSAGE})
+        logger.warning(
+            "rejected over-nested body on %s", _log_safe(request.url.path)
+        )
+        response = JSONResponse(status_code=422, content={"detail": RECURSION_MESSAGE})
+
+    for key, value in SECURITY_HEADERS.items():
+        response.headers.setdefault(key, value)
+    return response
 
 
 @app.get("/health")
@@ -130,19 +156,19 @@ def snapshot_current_profile(name: str = "current", include_personal_details: bo
 @app.post("/export/{version_id}")
 def export_version(
     version_id: str,
-    format: str = "pdf",
-    download: bool = True,
+    fmt: str = Query("pdf", alias="format", description="pdf | docx | txt"),
 ) -> Response:
     """Render a stored version to PDF, DOCX or TXT.
 
-    Returns the page count for PDFs in an X-Pages header so the page budget
-    from rules.json can be checked without re-parsing the file.
+    PDFs report the page count and budget in headers, so the rules.json page
+    limit can be checked without re-parsing the file. Exports are personal
+    documents, so they are sent no-store.
     """
-    fmt = format.lower()
+    fmt = fmt.lower()
     if fmt not in RENDERERS:
         raise HTTPException(
             status_code=400,
-            detail=f"unsupported format {format!r}; use one of {sorted(RENDERERS)}",
+            detail=f"unsupported format {fmt!r}; use one of {sorted(RENDERERS)}",
         )
 
     stored = db.get_version(version_id)
@@ -152,7 +178,7 @@ def export_version(
     doc = build_doc_from_version(version)
 
     limit = rules.page_limit(doc.level)
-    headers = {"X-Page-Limit": str(limit)}
+    headers = {"X-Page-Limit": str(limit), "Cache-Control": "no-store"}
     if fmt == "pdf":
         payload, pages, density = render_pdf_report(doc, max_pages=limit)
         headers["X-Pages"] = str(pages)
@@ -165,13 +191,13 @@ def export_version(
             logger.warning(
                 "version %s renders on %d pages, over the %d-page budget for a "
                 "%s resume; content must be trimmed",
-                version_id, pages, limit, doc.level,
+                _log_safe(version_id), pages, limit, doc.level,
             )
     else:
         payload = RENDERERS[fmt](doc)
 
-    filename = f"{_SAFE_NAME.sub('_', version.name or version_id)}.{fmt}"
-    headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    stem = _SAFE_NAME.sub("_", version.name or version_id).strip("._-") or "resume"
+    headers["Content-Disposition"] = f'attachment; filename="{stem}.{fmt}"'
     return Response(
         content=payload,
         media_type=MEDIA_TYPES[fmt],

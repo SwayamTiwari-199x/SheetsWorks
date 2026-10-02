@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from app.main import app
 from app.models import Experience, Profile
+from app.render import build_doc, render_docx, render_pdf, render_txt
 
 
 def contact(**kw) -> dict:
@@ -169,3 +170,111 @@ def test_profile_response_contains_no_secrets() -> None:
     blob = r.text.lower()
     for needle in ("api_key", "apikey", "bearer", "authorization", "gemini", "groq", "mistral"):
         assert needle not in blob, f"response leaked {needle!r}"
+
+
+# --------------------------------------------------------------------------
+# Second security sweep: response headers, dead API surface, log injection,
+# and unicode robustness in the renderers.
+# --------------------------------------------------------------------------
+
+
+def test_security_headers_present_on_success() -> None:
+    with TestClient(app) as client:
+        r = client.get("/health")
+    assert r.headers["x-content-type-options"] == "nosniff"
+    assert r.headers["x-frame-options"] == "DENY"
+    assert r.headers["referrer-policy"] == "no-referrer"
+    assert "default-src 'none'" in r.headers["content-security-policy"]
+
+
+def test_security_headers_present_on_404() -> None:
+    with TestClient(app) as client:
+        r = client.get("/profile")
+    assert r.status_code == 404
+    assert r.headers["x-content-type-options"] == "nosniff"
+
+
+def test_security_headers_present_on_422() -> None:
+    with TestClient(app) as client:
+        r = client.put("/profile", json={})
+    assert r.status_code == 422
+    assert r.headers["x-content-type-options"] == "nosniff"
+
+
+def test_export_sets_no_store() -> None:
+    """Exports are personal documents; they must not sit in a shared cache."""
+    with TestClient(app) as client:
+        client.put("/profile", json={"contact": {
+            "name": "A", "email": "a@b.com", "phone": "12345"}})
+        v = client.post("/versions/from-profile").json()
+        for fmt in ("pdf", "docx", "txt"):
+            r = client.post(f"/export/{v['id']}", params={"format": fmt})
+            assert r.headers["cache-control"] == "no-store", fmt
+
+
+def test_export_has_no_dead_download_parameter() -> None:
+    """`download` was accepted, documented and ignored."""
+    with TestClient(app) as client:
+        op = client.get("/openapi.json").json()["paths"]["/export/{version_id}"]["post"]
+    names = [p["name"] for p in op.get("parameters", [])]
+    assert "download" not in names
+    assert "format" in names
+
+
+def test_format_param_name_is_unchanged_for_callers() -> None:
+    """The Python param is now `fmt`; the wire name must stay `format`."""
+    with TestClient(app) as client:
+        client.put("/profile", json={"contact": {
+            "name": "A", "email": "a@b.com", "phone": "12345"}})
+        v = client.post("/versions/from-profile").json()
+        assert client.post(f"/export/{v['id']}?format=pdf").status_code == 200
+        assert client.post(f"/export/{v['id']}?format=txt").status_code == 200
+
+
+def test_filename_cannot_be_dot_only() -> None:
+    """A name of '..' must not yield a filename like '...pdf'."""
+    with TestClient(app) as client:
+        client.put("/profile", json={"contact": {
+            "name": "A", "email": "a@b.com", "phone": "12345"}})
+        v = client.post("/versions/from-profile", params={"name": ".."}).json()
+        r = client.post(f"/export/{v['id']}", params={"format": "txt"})
+    inner = r.headers["content-disposition"].split("filename=", 1)[1].strip('"')
+    assert inner == "resume.txt", inner
+
+
+@pytest.mark.parametrize(
+    "label,value",
+    [
+        ("Devanagari", "\u0905\u0926\u093f\u0924\u093f \u0936\u0930\u094d\u092e\u093e"),
+        ("CJK", "\u9648\u6653\u96ef"),
+        ("Cyrillic", "\u0410\u043d\u043d\u0430 \u0418\u0432\u0430\u043d\u043e\u0432\u0430"),
+        ("Arabic", "\u0623\u062d\u0645\u062f \u0639\u0644\u064a"),
+        ("Hebrew", "\u05d3\u05d5\u05d3 \u05db\u05d4\u05df"),
+        ("Greek", "\u0393\u03b9\u03ce\u03c1\u03b3\u03bf\u03c2"),
+        ("Emoji", "Hire me \U0001f680"),
+        ("Accents", "Jos\u00e9 M\u00fcller \u00c5ngstr\u00f6m"),
+        ("Turkish", "\u015eeyma \u00c7a\u011flayan"),
+    ],
+)
+def test_international_names_render_in_all_formats(label: str, value: str) -> None:
+    """An Indian resume routinely mixes scripts; rendering must not choke."""
+    profile = Profile.model_validate({
+        "contact": {"name": value, "email": "a@b.com", "phone": "12345", "city": value},
+        "summary": f"Engineer from {value}.",
+        "experience": [{
+            "org": value, "role": "Engineer", "start": "2022-01", "end": "Present",
+            "bullets": [{"raw_facts": "x", "text": f"Shipped {value} for 40% of traffic."}],
+        }],
+    })
+    doc = build_doc(profile)
+    assert render_pdf(doc).startswith(b"%PDF")
+    assert render_docx(doc)[:2] == b"PK"
+    assert value.encode("utf-8") in render_txt(doc)
+
+
+def test_log_sanitiser_strips_newlines() -> None:
+    from app.main import _log_safe
+
+    assert "\n" not in _log_safe("/profile%0A[FORGED] 2026-01-01 admin")
+    assert "\r" not in _log_safe("/x\r\nInjected: yes")
+    assert len(_log_safe("A" * 5000)) == 200

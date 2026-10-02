@@ -17,21 +17,9 @@ import pytest
 from docx import Document as DocxDocument
 
 from app import rules
-from app.models import Profile, Version
+from app.models import Profile
 from app.rules import load_rules
-from app.render import (
-    BULLET_MARK,
-    DENSITIES,
-    build_doc,
-    build_doc_from_version,
-    fmt_date,
-    fmt_range,
-    render_docx,
-    render_pdf,
-    render_pdf_report,
-    render_pdf_with_page_count,
-    render_txt,
-)
+from app.render import BULLET_MARK, DENSITIES, build_doc, render_docx, render_pdf, render_pdf_report, render_pdf_with_page_count, render_txt
 
 SPECIAL = "& % # _ $"
 
