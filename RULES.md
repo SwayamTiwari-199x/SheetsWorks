@@ -18,7 +18,7 @@ This file is the origin of truth for ATS/layout/writing conventions in this app.
   SOURCE: https://standout-cv.com/usa/stats-usa/how-long-recruiters-spend-looking-at-resume — `unverified` (single secondary source, but consistent with the eye-tracking studies)
 - Resumes that survive the scan have **simple layouts**; eye-tracking heatmaps show recruiters fixate first on: name, current title/company, dates, education (Ladders study). So contact + most-recent role + education must be scannable in seconds. —
   SOURCES: bu.edu and theladders.com above — **verified**
-- Recruiters do NOT run AI detectors and ATS does not auto-reject on "AI-written" content; rejection risk is human (see §7). —
+- Recruiters rarely run AI detectors, per limited evidence; ATS does not auto-reject on "AI-written" content; rejection risk is human (see §7). —
   SOURCE: https://www.reddit.com/r/jobsearchhacks/comments/1r32a25/i_spent_8_months_testing_how_ats_systems_actually/ (survey of 630 recruiters: 92% say their ATS does not auto-reject based on content) — `unverified` (forum-reported survey; no primary link) — but see §7 for the human side, which is well sourced.
 
 ## 1. Page limits by experience level

@@ -32,7 +32,7 @@
       "no tables, text boxes, columns, icons, images, charts",
       "contact info in body (not header/footer)",
       "reverse chronological order",
-      "consistent date format (e.g. 'Jan 2024' or '2024-01'); never '21"
+      "consistent date format (e.g. 'Jan 2024' or '2024-01'); avoid apostrophe-year dates like '21 and always include the month""
     ],
     "misc": { "auto_reject_by_ats": false, "tag_unverified": true }
   },
@@ -80,7 +80,7 @@
   "bullet_rules": {
     "structure": "action_verb + what + how_tool + measurable_result (XYZ: accomplished X, measured by Y, by doing Z)",
     "length_lines": { "min": 1, "max": 2, "tag": "verified" },
-    "words": { "min": 12, "max": 30, "tag": "verified" },
+    "words": { "min": 15, "max": 30, "tag": "verified" },
     "per_role_count": { "recommended_min": 2, "recommended_max": 5, "tag": "unverified" },
     "no_repeated_opener_within_section": true,
     "varied_verbs": true,
