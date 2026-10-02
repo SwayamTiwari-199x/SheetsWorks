@@ -1,42 +1,64 @@
 # PROGRESS
 
-CURRENT STAGE: 3 (Frontend: profile editor)
+CURRENT STAGE: 4 (AI assist per section + interview mode)
 
 ## Done
-- Stage 0 (accepted): `RULES.md` + `rules.json`, 75 distinct source URLs across 56 domains, every rule `verified`/`unverified`, `rules.json` parses. Repairs: `ats.layout_rules[5]` was still truncated after `8644a84` (valid JSON, garbled text) — fixed in `2f21233`; `meta.source_count` verified at 75 with a reproducible counting command in the RULES.md header; market-snapshot staleness made machine-checkable.
+- Stage 0 (accepted): `RULES.md` + `rules.json`, 75 distinct source URLs across 56 domains, every rule `verified`/`unverified`, `rules.json` parses.
 - Stage 1 (accepted): FastAPI app, pydantic models for Profile/Version/JobDescription/Application (SPEC §4), SQLite storage, `GET/PUT /profile`, provider-agnostic `llm.py`, `--check-llm`.
-- Stage 2 (accepted): renderers profile/version JSON → ATS-safe PDF (WeasyPrint), DOCX (python-docx), TXT. Canonical `Doc` intermediate means DOCX and TXT are textually identical by construction. `app/rules.py` is the single loader for every convention. `POST /versions/from-profile` + `POST /export/{version_id}?format=pdf|docx|txt`. **180 tests pass.**
+- Stage 2 (accepted): renderers profile/version JSON → ATS-safe PDF (WeasyPrint), DOCX (python-docx), TXT. Canonical `Doc` intermediate means DOCX and TXT are textually identical by construction. `app/rules.py` is the single loader for every convention.
+- Stage 3 (accepted): single-page terminal UI at `/`, no build step, zero dependencies. **279 tests pass.**
+
+### Stage 3 — the terminal UI
+`app/static/{index.html,term.css,app.js}`, mounted at `/`, plus one new route `POST /preview`.
+
+- **Navbar types commands instead of bypassing them.** Clicking a section runs `cd <section>` *through the terminal*, so you see the command echo. One interface, no divergence between UI and command state. Styled as a dim terminal title bar.
+- **No mouse handlers** except the navbar shortcut and the two preview-bar chrome buttons. Text selection and wheel scrolling deliberately still work so bullets can be copied out. Enforced by tests.
+- **Every character reaches the DOM via `textContent`.** No `innerHTML`, no `eval`. A terminal echoes user input and server output, which is exactly how terminal UIs become XSS vectors. Tests strip comments and grep for it.
+- **Live preview is the real exported PDF**, rendered server-side by `POST /preview` from the body the browser holds — not an HTML approximation that could quietly disagree with the file you actually send. Reports pages/limit/budget/density live.
+- **Reliability:** global `error` + `unhandledrejection` handlers, a try/catch boundary around command dispatch, guarded `localStorage` (private mode), autosave with visible `saving…/saved/save failed`, and `Ctrl+C` that discards a draft without killing the session.
+- **Learnability:** `/help` and `help` both work, Tab completion for commands/sections/fields/formats/themes, Levenshtein "did you mean", state-aware `hint`, `↑`/`↓` history, `help <topic>`.
+- **Undo from day one** (`u`, `Ctrl+Z`), 60-deep snapshot stack, per the decision to add it while the command set is small.
+- 4 themes (`amber`/`green`/`matrix`/`paper`) via `theme <name>`, persisted. Font stack is local-only — no web font download, so offline-first survives.
+- Command names chosen to survive later stages: `draft <section> --ai <text>` is the natural home for Stage 4's "Tell the AI".
+
+### Bugs found while building Stage 3
+Five real defects, four fatal or silent. Static tests could not have caught them; running `app.js` under node did.
+1. **Fatal:** `HELP_TOPICS.help` called `Object.keys(HELP_TOPICS)` inside its own initialiser — a temporal dead zone `ReferenceError` that killed `app.js` at load. The page would have been blank.
+2. `edit` read the field name from the wrong argument index, so it was broken for *both* list and single-value sections.
+3. `grade 8.7` wrote a `grade` key inside the grade object, producing `{"grade":"8.7"}` instead of `{"value":"8.7","scale":"10"}`.
+4. `profile` called `outLines('', …)` with a string instead of an array, throwing `forEach is not a function` mid-command.
+5. The "command not found" suggestion was missing its closing backtick — the most-read line in the app.
+Also: a mistyped field inside a draft reported "command not found" instead of "unknown field"; it now reports the field error with the valid list.
 
 ### Stage 2 findings and fixes
-- **Silent data loss (the important one).** `rules.json`'s `experienced` section order omitted `achievements_awards`, and `build_doc` iterated that list exactly — so an experienced candidate's Achievements section vanished from all three formats with no error and no warning. Fixed at the root: `achievements_awards` added to both level orders, plus a machine-readable `section_order.fallback_append` rule stating that a populated section the order did not place is appended, never discarded. RULES.md §3 amended with the gap and an honest `unverified` tag on the placement.
-- **A heading was hardcoded in Python.** `"Publications"` bypassed `rules.json`, which CLAUDE.md forbids. Now read via `rules.heading()`, and `Publications` added to `safe_headings.acceptable` with a note that it comes from SPEC §3 rather than a cited source.
-- **Page budget was ignored.** A heavy fresher CV rendered on 2 pages against a 1-page `rules.json` limit. The renderer now scales density (`normal` 1.0in → `compact` 0.75in → `tight` 0.5in) until it fits. Font is never scaled below the researched 10.5pt minimum and margins never below the researched 0.5in minimum. Measured: 12 bullets go 2 pages → 1 page via compression. If even `tight` overflows, the export returns a valid PDF but sets `X-Page-Budget: over` and logs a warning — trimming content is Stage 6's job.
-- **`market_snapshot.stale_after` disagreed with `stale_after_days`** (2027-01-02 is 92 days, not 90) and staleness used `>` so the expiry date itself counted as fresh. Corrected to 2026-12-31 with `>=`; a test now keeps the two fields in step.
-- Removed out-of-scope routes `/versions`, `/jd`, `/applications` (Stage 6/8) and `POST /validate/{version_id}` (Stage 7) — the last returned `passed: true` unconditionally. The *models* stay because Stage 1 asked for them per SPEC §4. The `versions` **table** came back, but only because Stage 2's required `POST /export/{version_id}` is dead code without it; listing/tailoring/JD links remain absent.
-- **Security pass** (21 tests in `tests/test_security.py`): DNS rebinding closed with `TrustedHostMiddleware`; over-nested JSON (~6KB of `[`) caused a 500 + traceback, now 422; invisible/control characters (NUL, U+202E RTL override, zero-width, bidi isolates, BOM, DEL) rejected naming the code point; list fields capped at 60/12/20. Verified **not** vulnerable with tests: SQL injection (queries are parameterised), CORS absent by design, no secret in any response.
-- Earlier fixes: `put_profile` keyed rows on the auto-generated `Profile.id` instead of `default`; test suite was not hermetic (`_env_file=None` does not disable process-env reads in pydantic-settings 2.15); `gemini-2.5-flash` retired for new accounts → `gemini-3.8-flash`; `--check-llm` gave raw tracebacks, now status-specific hints.
+- **Silent data loss.** `rules.json`'s `experienced` order omitted `achievements_awards` and `build_doc` iterated that list exactly, so an experienced candidate's Achievements vanished from all three formats with no error. Fixed at the root: added to both level orders, plus a machine-readable `section_order.fallback_append` rule that a populated section the order did not place is appended, never discarded. RULES.md §3 amended with an honest `unverified` tag.
+- **A heading was hardcoded in Python** (`"Publications"`), which CLAUDE.md forbids. Now via `rules.heading()`.
+- **Page budget ignored.** Density now scales `normal` 1.0in → `compact` 0.75in → `tight` 0.5in, never below the researched 10.5pt font or 0.5in margin minimum. 12 bullets go 2 pages → 1 page. If even `tight` overflows, export returns a valid PDF with `X-Page-Budget: over` rather than pretending.
+- **`market_snapshot.stale_after` disagreed with `stale_after_days`** by 2 days and used `>` so the expiry date counted as fresh. Fixed, with a test keeping them in step.
+
+### Security pass (tests in `tests/test_security.py`)
+DNS rebinding closed with `TrustedHostMiddleware`; over-nested JSON (~6KB of `[`) caused a 500 + traceback, now 422; invisible/control characters (NUL, U+202E, zero-width, bidi isolates, BOM, DEL) rejected naming the code point; list fields capped 60/12/20. Security headers on every response with **two CSPs** — `default-src 'none'` for API routes, `default-src 'self'` for the page (the strict API policy would otherwise have blanked the UI). Exports sent `no-store`. Verified **not** vulnerable with tests: SQL injection (queries parameterised), CORS absent by design, no secret in any response.
 
 ## Commands
 - install: `python -m venv .venv && .venv\Scripts\python -m pip install -r requirements.txt`
 - tests: `.venv\Scripts\python -m pytest`
-- app: `.venv\Scripts\python -m uvicorn app.main:app --reload` (http://localhost:8000, docs at /docs)
-- export: `POST /versions/from-profile?name=My Resume`, then `POST /export/<id>?format=pdf|docx|txt`
-- check LLM: `.venv\Scripts\python -m app.cli --check-llm` (exit 0 pass / 1 fail; needs a real key in `.env`)
+- **app + UI: `.venv\Scripts\python -m uvicorn app.main:app --reload`, open http://localhost:8000**
+- check LLM: `.venv\Scripts\python -m app.cli --check-llm`
+- terminal flow tests need node; they skip automatically without it
 
 ## Notes / decisions
-- One stage at a time (CLAUDE.md rule 2): no speculative endpoints or helpers for later stages. `test_stage2_exposes_only_its_own_routes` and `test_later_stage_routes_are_absent` fail if they creep back.
-- rules.json is a summary of RULES.md; RULES.md is prose-of-truth with sources. `app/rules.py` is the only reader, so no convention is ever taken from model memory.
-- **PDF engine: WeasyPrint, decided on measurement.** On a realistic fresher CV, Tectonic + Calibri dropped *every word space* in text extraction (`BITS Pilani` → `BITSPilani`, `+91 98765 43210` → `+919876543210`), keeping 9/20 content canaries; WeasyPrint kept 19/19, extracted with Calibri intact, and rendered in ~260ms vs ~4.7s. A PDF that looks right but cannot be text-parsed defeats the purpose of an ATS-targeted tool. Tectonic + Arial extracts correctly and remains a fallback if a future stage needs LaTeX.
-- **Bullets are a literal ASCII hyphen**, not a CSS list marker: a generated `•` or `–` extracts as U+FFFD, garbling ATS text. Confirmed empirically and enforced by `test_criterion2_no_garbled_glyphs`. This implements RULES.md §2's "decorative bullet glyphs can garble".
-- Section headings render uppercase (industry convention); the underlying strings stay title-case per `safe_headings`. ATS heading matching is case-insensitive.
-- Personal details are opt-in per version and off by default. They are read as text only; `photo_path` is never opened.
-- HTML and `photo_path` are stored verbatim on purpose. **Stage 3 must assign profile fields with `textContent`, never `innerHTML`.** JD text will be third-party input in Stage 5 and is the realistic XSS vector.
-- `llm.py`: `ask(schema, prompt)` only. gemini/groq/mistral share one OpenAI-compatible httpx path; anthropic has its own `/messages` branch. Schema embedded in the prompt, no provider JSON modes. Retry exactly once, then `LLMError`. HTTP failures also become `LLMError` with a status hint.
-- Tests fake `httpx.Client` (tests/fakes.py) rather than using `respx`: one fewer dependency, and it asserts the *number* of HTTP calls, which is the retry-once contract.
-- Dates are ISO strings validated by regex, not `date` types, so `2022-07` is valid without inventing day numbers. `end="Present"` allowed; `end < start` rejected. Rendered as `Jul 2022`, never `'22`.
+- One stage at a time (CLAUDE.md rule 2): no speculative endpoints or helpers for later stages. `test_stage3_exposes_only_its_own_routes` and `test_later_stage_routes_are_absent` fail if they creep back.
+- rules.json is a summary of RULES.md; RULES.md is prose-of-truth. `app/rules.py` is the only reader, so no convention is ever taken from model memory.
+- **CLAUDE.md rule 8 (no visual polish) was overridden once, by the user, for Stage 3 only.** Kept cheap: CSS custom properties, no theming framework, no dependencies.
+- **PDF engine: WeasyPrint, chosen on measurement.** Tectonic + Calibri dropped *every word space* in text extraction, keeping 9/20 content canaries; WeasyPrint kept 19/19 and renders in ~260ms vs ~4.7s.
+- **Bullets are a literal ASCII hyphen**, not a CSS list marker: a generated `•` extracts as U+FFFD and garbles ATS parsing. Implements RULES.md §2.
+- `llm.py`: `ask(schema, prompt)` only. Schema embedded in the prompt, no provider JSON modes. Retry once, then `LLMError`.
+- Tests fake `httpx.Client` (tests/fakes.py) rather than `respx`, and assert the *number* of HTTP calls, which is the retry-once contract.
+- Dates are ISO strings validated by regex, so `2022-07` is valid without inventing day numbers. Rendered `Jul 2022`, never `'22`.
 
 ## Known issues
-- **BLOCKER for live LLM use:** the configured Gemini project returns 403 "Your project has been denied access" for all Gemini 3.x models, and the 2.5 family is retired for new accounts. Enable model access in Google AI Studio / Cloud console, or point `LLM_PROVIDER` at another provider. All code paths are proven by mocks; only the live wire format is unverified. Stages 4+ depend on this.
-- A resume genuinely longer than the page budget (16+ long bullets on one page) still exports at 2 pages with `X-Page-Budget: over`. Intentional — Stage 6 does deliberate trimming.
-- Python 3.14 in use; starlette warns `httpx` with `TestClient` is deprecated in favour of `httpx2`. Harmless now.
-- Stage 3 has no UI yet: the app serves JSON only.
+- **BLOCKER for Stage 4:** the configured Gemini project returns 403 "Your project has been denied access" for all Gemini 3.x models, and the 2.5 family is retired for new accounts. Enable access in Google AI Studio / Cloud console, or point `LLM_PROVIDER` at another provider. All code paths are proven by mocks; only the live wire format is unverified. **Stage 4 cannot be verified end-to-end until this is resolved.**
+- A resume genuinely longer than the page budget still exports over budget with `X-Page-Budget: over`. Intentional — Stage 6 does deliberate trimming.
+- `POST /versions` is unbounded, so versions accumulate. A cap now would become a bug in Stage 6, where tailoring legitimately creates many; revisit with retention in Stage 8.
+- Python 3.14; starlette warns `httpx` with `TestClient` is deprecated in favour of `httpx2`. Harmless now.
+- Undo is per-browser-tab and not persisted across reloads. Acceptable while small; may want a server-side store later.

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="amber">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>resume-builder — bash</title>
+<link rel="stylesheet" href="/static/term.css">
+</head>
+<body>
+
+<!-- Navbar: styled as a terminal title bar. Every item TYPES a command into the
+     terminal and runs it, so the terminal stays the single source of truth and
+     the navbar is only a shortcut surface. -->
+<nav id="navbar" aria-label="Section shortcuts">
+  <span class="nb-title">~/resume-builder — bash</span>
+  <span class="nb-items" id="nbItems"></span>
+  <span class="nb-status" id="nbStatus" role="status" aria-live="polite">connecting…</span>
+</nav>
+
+<main id="screen">
+  <div id="scrollback" role="log" aria-live="polite" aria-label="Terminal output"></div>
+
+  <form id="promptForm" autocomplete="off">
+    <label for="cmd" id="promptLabel" class="prompt-label">resume-builder</label>
+    <span class="prompt-path" id="promptPath">~</span>
+    <span class="prompt-sigil">$</span>
+    <input id="cmd" name="cmd" type="text" spellcheck="false" autocapitalize="off"
+           autocorrect="off" aria-describedby="promptLabel">
+  </form>
+</main>
+
+<!-- Live preview: the real exported PDF, not an approximation. -->
+<section id="previewPane" hidden aria-label="Live resume preview">
+  <div id="previewBar">
+    <span id="previewTitle">preview.pdf</span>
+    <span id="previewMeta"></span>
+    <button id="previewRefresh" type="button" title="Refresh preview (Ctrl+P also toggles)">refresh</button>
+    <button id="previewClose" type="button" title="Close preview">close</button>
+  </div>
+  <iframe id="previewFrame" title="Rendered resume PDF"></iframe>
+</section>
+
+<noscript>
+  <p class="noscript">This terminal needs JavaScript. The API still works without it:
+  <code>PUT /profile</code>, <code>POST /export/{'{version_id}'}</code>.</p>
+</noscript>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

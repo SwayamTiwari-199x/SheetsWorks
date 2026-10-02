@@ -31,13 +31,13 @@ def test_openapi_schema_builds() -> None:
     assert {"get", "put"} <= set(schema["paths"]["/profile"])
 
 
-def test_stage2_exposes_only_its_own_routes() -> None:
-    """Stage 1+2 scope. Guards against speculative endpoints creeping back.
+def test_stage3_exposes_only_its_own_routes() -> None:
+    """Stage 1+2+3 scope. Guards against speculative endpoints creeping back.
 
-    Stage 2 legitimately adds the version snapshot and export routes because
-    POST /export/{version_id} is required by BUILD_PLAN Stage 2 and needs a
-    stored version to export. Everything else (validators, JD, applications,
-    tailoring) belongs to a later stage and must stay absent.
+    Stage 3 adds exactly one API route, POST /preview, because the live preview
+    must render the profile the browser currently holds rather than wait for
+    the debounced autosave. Everything else (assist, jd, tailor, validate,
+    applications) belongs to a later stage and must stay absent.
     """
     with TestClient(app) as client:
         paths = set(client.get("/openapi.json").json()["paths"])
@@ -47,6 +47,7 @@ def test_stage2_exposes_only_its_own_routes() -> None:
         "/versions",
         "/versions/from-profile",
         "/export/{version_id}",
+        "/preview",
     }
 
 
@@ -59,6 +60,6 @@ def test_later_stage_routes_are_absent() -> None:
     """Nothing from Stage 4-8 may exist yet."""
     with TestClient(app) as client:
         paths = set(client.get("/openapi.json").json()["paths"])
-    for not_yet in ("/assist/{section}", "/jd/analyze", "/jd/gap", "/tailor",
-                    "/applications", "/validate/{version_id}"):
+    for not_yet in ("/assist/{section}", "/assist/answer", "/jd/analyze", "/jd/gap",
+                    "/tailor", "/applications", "/validate/{version_id}"):
         assert not_yet not in paths, f"{not_yet} belongs to a later stage"

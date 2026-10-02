@@ -15,9 +15,11 @@ from __future__ import annotations
 import logging
 import re
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import db, rules
@@ -25,6 +27,7 @@ from .models import Profile, Version
 from .render import (
     MEDIA_TYPES,
     RENDERERS,
+    build_doc,
     build_doc_from_version,
     render_pdf_report,
 )
@@ -39,14 +42,21 @@ PROFILE_ID = "default"
 # GET carries no preflight, and the browser blocks the *read*, not the request.
 ALLOWED_HOSTS = ["localhost", "127.0.0.1", "[::1]", "testserver"]
 
-# Sent on every response. nosniff matters as soon as Stage 3 serves the profile
-# back over HTTP: without it a browser may sniff a JSON response as HTML and run
-# it. The CSP is deny-all because no API response is ever meant to be a document.
-SECURITY_HEADERS = {
+# Two policies, not one. API responses are data and must never be treated as a
+# document; the terminal page does need to load its own stylesheet and script.
+API_CSP = "default-src 'none'; frame-ancestors 'none'"
+PAGE_CSP = (
+    "default-src 'self'; style-src 'self'; script-src 'self'; "
+    "img-src 'self' data:; frame-src 'self'; base-uri 'none'; "
+    "form-action 'none'; frame-ancestors 'none'"
+)
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+COMMON_SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
     "X-Frame-Options": "DENY",
-    "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
 }
 
 # Resume fields are length-capped, but a deeply nested JSON body is not a length
@@ -97,9 +107,21 @@ async def security_and_recursion(request, call_next):
         )
         response = JSONResponse(status_code=422, content={"detail": RECURSION_MESSAGE})
 
-    for key, value in SECURITY_HEADERS.items():
+    path = request.url.path
+    is_page = path in ("/", "") or path.startswith("/static/")
+    response.headers["Content-Security-Policy"] = PAGE_CSP if is_page else API_CSP
+    for key, value in COMMON_SECURITY_HEADERS.items():
         response.headers.setdefault(key, value)
     return response
+
+
+@app.get("/", include_in_schema=False)
+def terminal_page() -> FileResponse:
+    """The single-page terminal UI (Stage 3)."""
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 @app.get("/health")
@@ -202,4 +224,37 @@ def export_version(
         content=payload,
         media_type=MEDIA_TYPES[fmt],
         headers=headers,
+    )
+
+
+# --------------------------------------------------------------------------
+# Live preview (Stage 3)
+# --------------------------------------------------------------------------
+
+
+@app.post("/preview")
+def preview_current_profile(profile: Profile) -> Response:
+    """Render the profile the caller just sent, without storing a version.
+
+    Deliberately takes the body rather than reading /profile: the terminal
+    autosaves on a debounce, and a preview that waited for the save would lag
+    behind the keystrokes. This is the same renderer the exporter uses, so the
+    preview is the real artifact and not an HTML approximation that could
+    quietly disagree with the exported file.
+    """
+    doc = build_doc(profile)
+    limit = rules.page_limit(doc.level)
+    payload, pages, density = render_pdf_report(doc, max_pages=limit)
+    return Response(
+        content=payload,
+        media_type=MEDIA_TYPES["pdf"],
+        headers={
+            "X-Pages": str(pages),
+            "X-Page-Limit": str(limit),
+            "X-Page-Budget": "over" if pages > limit else "ok",
+            "X-Density": density,
+            "X-Level": doc.level,
+            "Cache-Control": "no-store",
+            "Content-Disposition": "inline",
+        },
     )
