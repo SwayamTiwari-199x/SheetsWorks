@@ -90,7 +90,10 @@ def test_check_llm_fails_on_http_error(
 
     config.get_settings.cache_clear()
     assert cli.run_check() == 1
-    assert "FAIL" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "FAIL" in out
+    assert "HTTP 401" in out
+    assert "hint:" in out
 
 
 def test_check_llm_fails_on_wrong_content(

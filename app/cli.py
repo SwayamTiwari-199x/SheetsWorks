@@ -41,9 +41,11 @@ def run_check() -> int:
     try:
         out = ask(PingOut, "Reply with answer='pong' and ok=true.")
     except LLMError as exc:
-        print(f"result   : FAIL - {exc}")
+        print(f"result   : FAIL")
+        for line in exc.report().splitlines():
+            print(f"           {line}")
         return 1
-    except Exception as exc:  # network, bad key, etc.
+    except Exception as exc:  # network, DNS, TLS, ...
         print(f"result   : FAIL - {type(exc).__name__}: {exc}")
         return 1
 

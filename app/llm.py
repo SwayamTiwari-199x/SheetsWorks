@@ -61,13 +61,102 @@ RETRY_HINT = (
 
 
 class LLMError(RuntimeError):
-    """Raised after the single retry also fails."""
+    """Raised after the single retry also fails, or on a provider-side failure."""
 
-    def __init__(self, message: str, *, provider: str, model: str, detail: str = ""):
+    def __init__(
+        self,
+        message: str,
+        *,
+        provider: str,
+        model: str,
+        detail: str = "",
+        status_code: int | None = None,
+        hint: str = "",
+    ):
         super().__init__(message)
         self.provider = provider
         self.model = model
         self.detail = detail
+        self.status_code = status_code
+        self.hint = hint
+
+    def report(self) -> str:
+        """Multi-line, actionable rendering for the CLI."""
+        head = f"[{self.provider}/{self.model}] {self}"
+        if self.detail:
+            head += f"\n  provider said: {self.detail}"
+        if self.hint:
+            head += f"\n  hint: {self.hint}"
+        return head
+
+
+def _extract_error_message(body: Any) -> str:
+    """Pull the human-readable message out of a provider error body.
+
+    Google returns a *list* of error objects where OpenAI returns a single
+    object, so both shapes have to be handled.
+    """
+    try:
+        payload = body
+        if isinstance(payload, list) and payload:
+            payload = payload[0]
+        if isinstance(payload, dict):
+            err = payload.get("error", payload)
+            if isinstance(err, dict) and err.get("message"):
+                return str(err["message"])
+            if isinstance(err, dict) and err.get("message"):
+                return str(err["message"])
+    except Exception:
+        pass
+    return ""
+
+
+# Status-specific advice. Every one of these has actually been hit during
+# development, so they are written as fixes rather than restatements.
+_STATUS_HINTS = {
+    400: "The provider rejected the request shape; check LLM_MODEL and the max_tokens/temperature values.",
+    401: "API key missing or invalid. Check the key for LLM_PROVIDER in .env.",
+    403: (
+        "Authenticated, but this account/project has no access to the model. "
+        "On Google AI Studio / Cloud console enable the model for your project, "
+        "or switch LLM_PROVIDER to a provider your key can reach."
+    ),
+    404: (
+        "Unknown model or endpoint. The model id may be retired or the "
+        "OpenAI-compatible route may not exist for it. Check LLM_MODEL."
+    ),
+    429: "Rate limit or quota exceeded. Wait, or check the provider's quota/billing.",
+}
+
+
+def _http_error(
+    exc: Exception, settings: Settings, status_code: int
+) -> LLMError:
+    """Translate an httpx failure into an actionable LLMError."""
+    message = ""
+    detail = ""
+    response = getattr(exc, "response", None)
+    if response is not None:
+        try:
+            detail = _extract_error_message(response.json())
+        except Exception:
+            try:
+                detail = response.text[:300]
+            except Exception:
+                detail = ""
+        message = f"HTTP {status_code} from {settings.llm_provider}"
+    else:
+        message = f"{type(exc).__name__}: {exc}"
+        detail = str(exc)[:300]
+
+    return LLMError(
+        message,
+        provider=settings.llm_provider,
+        model=str(settings.llm_model),
+        detail=detail,
+        status_code=status_code,
+        hint=_STATUS_HINTS.get(status_code, ""),
+    )
 
 
 def schema_prompt(schema: type[BaseModel]) -> str:
@@ -129,13 +218,15 @@ def _post_openai_compat(
     settings: Settings, client: httpx.Client, system: str, user: str
 ) -> str:
     """gemini / groq / mistral: OpenAI chat-completions dialect."""
-    resp = client.post(
+    resp = _post(
+        client,
         f"{settings.base_url}/chat/completions",
+        settings,
         headers={
             "Authorization": f"Bearer {settings.api_key}",
             "Content-Type": "application/json",
         },
-        json={
+        body={
             "model": settings.llm_model,
             "temperature": settings.llm_temperature,
             "max_tokens": settings.llm_max_tokens,
@@ -145,7 +236,6 @@ def _post_openai_compat(
             ],
         },
     )
-    resp.raise_for_status()
     return resp.json()["choices"][0]["message"]["content"]
 
 
@@ -153,14 +243,16 @@ def _post_anthropic(
     settings: Settings, client: httpx.Client, system: str, user: str
 ) -> str:
     """anthropic: system prompt is a top-level field, not a message."""
-    resp = client.post(
+    resp = _post(
+        client,
         f"{settings.base_url}/messages",
+        settings,
         headers={
             "x-api-key": settings.api_key or "",
             "anthropic-version": "2023-06-01",
             "Content-Type": "application/json",
         },
-        json={
+        body={
             "model": settings.llm_model,
             "max_tokens": settings.llm_max_tokens,
             "temperature": settings.llm_temperature,
@@ -168,9 +260,26 @@ def _post_anthropic(
             "messages": [{"role": "user", "content": user}],
         },
     )
-    resp.raise_for_status()
     blocks = resp.json().get("content", [])
     return "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+
+
+def _post(
+    client: httpx.Client, url: str, settings: Settings, *, headers: dict, body: dict
+):
+    """POST and convert transport/HTTP failures into LLMError.
+
+    Credentials are never put in an error message: only the status code and
+    whatever text the provider chose to send back are surfaced.
+    """
+    try:
+        resp = client.post(url, headers=headers, json=body)
+        resp.raise_for_status()
+        return resp
+    except httpx.HTTPStatusError as exc:
+        raise _http_error(exc, settings, exc.response.status_code) from None
+    except httpx.HTTPError as exc:
+        raise _http_error(exc, settings, 0) from None
 
 
 def _complete(settings: Settings, client: httpx.Client, system: str, user: str) -> str:

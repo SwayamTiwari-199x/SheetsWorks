@@ -16,6 +16,31 @@ for var in ("ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "MISTRAL_API_
 from app import config, db  # noqa: E402
 from app.models import Profile  # noqa: E402
 
+# Anything the developer's real environment might set. pydantic-settings always
+# reads the process environment and `_env_file=None` does NOT disable that, so
+# these must be cleared explicitly or tests become machine-dependent.
+_LLM_ENV_VARS = [
+    "LLM_PROVIDER",
+    "LLM_MODEL",
+    "LLM_TIMEOUT_SECONDS",
+    "LLM_MAX_TOKENS",
+    "LLM_TEMPERATURE",
+    "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY",
+    "GROQ_API_KEY",
+    "MISTRAL_API_KEY",
+]
+
+
+@pytest.fixture(autouse=True)
+def isolated_llm_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Guarantee no test sees the real .env or an ambient LLM_* variable."""
+    for var in _LLM_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+    config.get_settings.cache_clear()
+    yield
+    config.get_settings.cache_clear()
+
 
 @pytest.fixture(autouse=True)
 def temp_db(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
@@ -32,20 +57,6 @@ def temp_db(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
             os.remove(db_path + suffix)
         except OSError:
             pass
-
-
-@pytest.fixture
-def settings_factory():
-    """Build Settings with an explicit provider, bypassing the .env file."""
-
-    def _make(provider: str, **overrides):
-        return config.Settings(
-            llm_provider=provider,
-            _env_file=None,
-            **{k: v for k, v in overrides.items() if k != "api_key"},
-        )
-
-    return _make
 
 
 @pytest.fixture

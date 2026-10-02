@@ -12,18 +12,28 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+import httpx
+
 
 class FakeResponse:
-    def __init__(self, payload: dict[str, Any], status_code: int = 200):
-        self._payload = payload
+    """Wraps a real httpx.Response so raise_for_status() behaves identically."""
+
+    def __init__(self, payload: dict[str, Any], status_code: int = 200, url: str = "https://example.test/"):
+        request = httpx.Request("POST", url)
+        self._response = httpx.Response(
+            status_code, json=payload, request=request
+        )
         self.status_code = status_code
 
     def raise_for_status(self) -> None:
-        if self.status_code >= 400:
-            raise RuntimeError(f"HTTP {self.status_code}")
+        self._response.raise_for_status()
 
     def json(self) -> dict[str, Any]:
-        return self._payload
+        return self._response.json()
+
+    @property
+    def text(self) -> str:
+        return self._response.text
 
 
 @dataclass
@@ -34,6 +44,8 @@ class FakeClient:
     status_code: int = 200
     calls: list[dict[str, Any]] = field(default_factory=list)
     closed: bool = False
+    # Google nests error objects in a list; OpenAI-compatible providers don't.
+    google_error_shape: bool = False
 
     def post(self, url: str, *, headers: dict, json: dict) -> FakeResponse:
         self.calls.append({"url": url, "headers": headers, "json": json})
@@ -41,12 +53,18 @@ class FakeClient:
         idx = min(len(self.calls) - 1, len(self.replies) - 1)
         text = self.replies[idx] if self.replies else "{}"
 
+        if self.status_code >= 400:
+            # Error shape: google uses a list, openai-compatible uses a dict.
+            err: Any = {"error": {"message": text, "code": self.status_code}}
+            payload = [err] if self.google_error_shape else err
+            return FakeResponse(payload, self.status_code, url)
+
         if "/messages" in url:  # anthropic branch
-            payload: dict[str, Any] = {"content": [{"type": "text", "text": text}]}
+            payload = {"content": [{"type": "text", "text": text}]}
         else:  # openai-compatible branch
             payload = {"choices": [{"message": {"role": "assistant", "content": text}}]}
 
-        return FakeResponse(payload, self.status_code)
+        return FakeResponse(payload, self.status_code, url)
 
     def close(self) -> None:
         self.closed = True

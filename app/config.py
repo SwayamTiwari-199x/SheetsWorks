@@ -17,6 +17,9 @@ Provider = Literal["gemini", "groq", "mistral", "anthropic"]
 
 PROVIDERS: tuple[Provider, ...] = ("gemini", "groq", "mistral", "anthropic")
 
+# Used when neither .env nor the process environment names a provider.
+DEFAULT_PROVIDER: Provider = "anthropic"
+
 # Base URL of the OpenAI-compatible /chat/completions endpoint per provider.
 OPENAI_COMPAT_BASE_URLS: dict[Provider, str] = {
     "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
@@ -28,7 +31,7 @@ ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1"
 
 # Defaults used when LLM_MODEL is not set.
 DEFAULT_MODELS: dict[Provider, str] = {
-    "gemini": "gemini-2.5-flash",
+    "gemini": "gemini-3.8-flash",
     "groq": "llama-3.3-70b-versatile",
     "mistral": "mistral-large-latest",
     "anthropic": "claude-sonnet-4-5",
@@ -54,7 +57,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    llm_provider: Provider = "anthropic"
+    llm_provider: Provider = DEFAULT_PROVIDER
     llm_model: str | None = None
     llm_timeout_seconds: float = 60.0
     llm_max_tokens: int = 2048

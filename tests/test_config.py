@@ -8,6 +8,7 @@ from app.config import (
     ANTHROPIC_BASE_URL,
     API_KEY_VARS,
     DEFAULT_MODELS,
+    DEFAULT_PROVIDER,
     OPENAI_COMPAT_BASE_URLS,
     PROVIDERS,
     ConfigError,
@@ -59,7 +60,34 @@ def test_api_key_absent_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_default_provider_is_anthropic() -> None:
-    assert Settings(_env_file=None).llm_provider == "anthropic"
+    assert Settings(_env_file=None).llm_provider == DEFAULT_PROVIDER == "anthropic"
+
+
+def test_default_provider_ignores_ambient_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: process env wins over .env and _env_file=None cannot stop it.
+
+    A stray LLM_PROVIDER in the shell used to make this suite fail on one
+    machine and pass on another.
+    """
+    monkeypatch.setenv("LLM_PROVIDER", "mistral")
+    assert Settings(_env_file=None).llm_provider == "mistral"
+
+
+def test_conftest_scrubs_ambient_llm_env() -> None:
+    """The autouse isolated_llm_env fixture must keep LLM vars out of tests."""
+    import os
+
+    for var in ("LLM_PROVIDER", "GEMINI_API_KEY", "ANTHROPIC_API_KEY"):
+        assert var not in os.environ, f"{var} leaked into the test process"
+
+
+def test_real_env_is_not_read_by_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Even with the repo's .env present, tests must resolve to the default."""
+    monkeypatch.setenv("LLM_PROVIDER", "groq")
+    monkeypatch.delenv("LLM_PROVIDER")
+    assert Settings(_env_file=None).llm_provider == DEFAULT_PROVIDER
 
 
 def test_config_error_is_exported() -> None:

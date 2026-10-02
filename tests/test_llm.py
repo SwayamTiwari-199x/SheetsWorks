@@ -196,7 +196,49 @@ def test_unknown_provider_raises_before_any_request() -> None:
     assert client.call_count == 0
 
 
-def test_http_error_propagates() -> None:
-    client = FakeClient(replies=["x"], status_code=401)
-    with pytest.raises(RuntimeError):
+def test_http_error_becomes_llm_error_with_hint() -> None:
+    """Transport failures must surface as LLMError, not a raw httpx traceback."""
+    for status, expect in ((401, "API key"), (403, "no access"), (404, "retired")):
+        client = FakeClient(replies=["x"], status_code=status)
+        with pytest.raises(LLMError) as exc:
+            ask(Out, "p", settings=settings_for("groq"), client=client)
+        assert exc.value.status_code == status
+        assert expect in exc.value.hint
+
+
+def test_http_error_report_is_actionable() -> None:
+    client = FakeClient(replies=["x"], status_code=403)
+    with pytest.raises(LLMError) as exc:
         ask(Out, "p", settings=settings_for("groq"), client=client)
+    report = exc.value.report()
+    assert "groq" in report
+    assert "HTTP 403" in report
+    assert "hint:" in report
+
+
+def test_error_message_extracted_from_google_list_shape() -> None:
+    """Google returns [{"error": {...}}]; OpenAI returns {"error": {...}}."""
+    from app.llm import _extract_error_message
+
+    assert _extract_error_message(
+        [{"error": {"message": "Your project has been denied access."}}]
+    ) == "Your project has been denied access."
+    assert _extract_error_message({"error": {"message": "bad key"}}) == "bad key"
+    assert _extract_error_message("not json") == ""
+
+
+def test_gemini_default_model_is_not_retired() -> None:
+    """gemini-2.5-flash was withdrawn for new accounts and 404'd."""
+    s = Settings(llm_provider="gemini", _env_file=None)
+    assert s.llm_model == "gemini-3.8-flash"
+
+
+def test_no_credential_leaks_into_error_detail() -> None:
+    """An error must never echo the API key back to the user or the log."""
+    client = FakeClient(replies=["x"], status_code=401)
+    s = settings_for("groq")
+    with pytest.raises(LLMError) as exc:
+        ask(Out, "p", settings=s, client=client)
+    blob = f"{exc.value} {exc.value.detail} {exc.value.hint} {exc.value.report()}"
+    assert "sk-" not in blob
+    assert "Bearer" not in blob
