@@ -1,0 +1,133 @@
+{
+  "meta": {
+    "generated_at": "2026-10-02",
+    "source_doc": "RULES.md",
+    "source_count": 30,
+    "notes": "All rules carry sources and verified/unverified tags in RULES.md. refresh_market_data task: re-run market searches every ~3 months."
+  },
+  "recruiter_behavior": {
+    "initial_scan_seconds": { "median_estimate": 7.4, "range": [5, 30], "tag": "verified" },
+    "first_fixations": ["name", "current_title_company", "dates", "education"],
+    "recruiter_scan_gap_before_tailoring": "Most resumes fail the 7-second scan when contact, most recent role, or education is buried."
+  },
+  "page_limits": {
+    "student": { "max": 1, "target": 1, "tag": "verified" },
+    "fresher": { "max": 1, "target": 1, "tag": "verified" },
+    "experienced": { "max": 2, "target": 2, "tag": "verified" },
+    "executive_15y_plus": { "max": 3, "target": 2, "tag": "unverified" },
+    "us_federal": { "max": 2, "hard_cap": true, "tag": "verified" }
+  },
+  "ats": {
+    "file_formats_ranked": ["text_pdf", "docx"],
+    "scanned_image_pdf": "banned (unparseable)",
+    "fonts": {
+      "safe": ["Calibri", "Arial", "Helvetica", "Times New Roman", "Cambria", "Georgia", "Verdana", "Tahoma"],
+      "body_size_pt": [10.5, 12],
+      "tag": "verified"
+    },
+    "margins_inches": { "recommended": 1.0, "min": 0.5 },
+    "layout_rules": [
+      "single column",
+      "left-aligned text",
+      "no tables, text boxes, columns, icons, images, charts",
+      "contact info in body (not header/footer)",
+      "reverse chronological order",
+      "consistent date format (e.g. 'Jan 2024' or '2024-01'); never '21"
+    ],
+    "misc": { "auto_reject_by_ats": false, "tag_unverified": true }
+  },
+  "section_order": {
+    "student_fresher": ["contact", "summary", "education", "projects", "internships_experience", "skills", "certifications", "achievements_awards"],
+    "experienced": ["contact", "summary", "work_experience", "projects", "skills", "education", "certifications"],
+    "tag": "verified"
+  },
+  "safe_headings": {
+    "acceptable": ["Summary", "Work Experience", "Experience", "Professional Experience", "Education", "Skills", "Technical Skills", "Core Competencies", "Projects", "Certifications", "Achievements", "Awards"],
+    "avoid": ["My Journey", "What I Bring", "About Me", "Career Objective", "Extra-Curricular Activities (unclear variants)"],
+    "tag": "verified"
+  },
+  "banned_phrases": [
+    "team player",
+    "hard worker",
+    "hardworking",
+    "detail-oriented",
+    "results-driven",
+    "results-oriented",
+    "self-starter",
+    "go-getter",
+    "passionate about",
+    "think outside the box",
+    "outside-the-box",
+    "rockstar",
+    "ninja",
+    "guru",
+    "synergy",
+    "responsible for",
+    "worked on various",
+    "involved in",
+    "duties included",
+    "assisted in",
+    "helped with",
+    "participated in",
+    "excellent communication skills"
+  ],
+  "preferred_verbs": [
+    "built", "designed", "implemented", "led", "shipped", "migrated", "automated", "reduced", "increased", "improved",
+    "launched", "developed", "architected", "optimized", "debugged", "deployed", "integrated", "scaled", "measured",
+    "cut", "accelerated", "refactored", "streamlined", "delivered", "owned", "partnered", "coordinated", "documented",
+    "tested", "instrumented", "trained", "mentored"
+  ],
+  "bullet_rules": {
+    "structure": "action_verb + what + how_tool + measurable_result (XYZ: accomplished X, measured by Y, by doing Z)",
+    "length_lines": { "min": 1, "max": 2, "tag": "verified" },
+    "words": { "min": 12, "max": 30, "tag": "verified" },
+    "per_role_count": { "recommended_min": 2, "recommended_max": 5, "tag": "unverified" },
+    "no_repeated_opener_within_section": true,
+    "varied_verbs": true,
+    "tense": { "current_role": "present", "past_roles": "past", "tag": "verified" },
+    "quantification": "report real scale/metrics only (users, latency, cost, time, revenue, team size); if no number, state scope of work. NEVER invent numbers.",
+    "summary": { "lines": [2, 4], "words": [50, 100], "tag": "verified" },
+    "low_metric_verbs_banned_in_openers": ["responsible for", "helped", "assisted", "participated", "worked on various"]
+  },
+  "tech_role_rules": {
+    "projects_must_have": ["problem", "tech_stack", "your_role", "result_or_metric", "live_link"],
+    "links": ["GitHub", "portfolio", "project demo", "published paper"],
+    "link_rules": ["clickable", "cleaned profile before linking"],
+    "coursework": { "students": "include", "senior_level": "drop", "tag": "verified" },
+    "grade_format": "always include scale, e.g. 'CGPA 8.7/10'"
+  },
+  "india_specific": {
+    "personal_fields": {
+      "photo": { "default": "omit", "note": "not expected for private-sector; only if explicitly asked", "tag": "verified" },
+      "date_of_birth": { "default": "omit", "tag": "verified" },
+      "gender": { "default": "omit", "tag": "verified" },
+      "marital_status": { "default": "omit", "tag": "verified" },
+      "fathers_name": { "default": "omit", "tag": "verified" },
+      "legacy_note": "Biodata-style fields are common in older Indian formats and some legacy guides; they are not required for ATS/global resumes."
+    },
+    "education": {
+      "cgpa_for_freshers": "expected; include scale",
+      "class10_class12_marks": {
+        "fresher_campus": "include if campus/service-company drives ask",
+        "experienced": "drop",
+        "tag": "verified"
+      }
+    },
+    "portals": ["Naukri", "Naukri RMS", "LinkedIn", "Foundit", "Instahyre", "Wellfound"],
+    "portals_parsing_note": "Reverse-chronological, parser-safe formats get reportedly ~3x more callbacks (vendor data, treat cautiously); 'verified' only for the direction, not the multiplier.",
+    "fresher_page_limit": 1,
+    "tracker_source_field_note": "Cache Indian sources in tracker: Naukri, Instahyre, Foundit, LinkedIn, referral, portal, career fair."
+  },
+  "ai_detection_honesty": {
+    "summary": "Detectors unreliable; ~80% of hiring managers claim they can spot AI resumes; ~19.6% reject outright; 62% reject un-personalized AI resumes. Recruiters care about authenticity, not AI use per se. Defense = user's own facts, numbers, vocabulary, and human review. No detector-evasion features.",
+    "sources": ["topresume.com 2025 survey (verified)", "Resume Genius via LinkedIn (unverified)", "Resume Now via resumevera (unverified)", "NACE (unverified)", "Journal of Applied Psychology 2025 study (unverified)"],
+    "app_policy": "no_evasion_features"
+  },
+  "market_snapshot": {
+    "date": "2026-10-02",
+    "stale_warning": "STALE after ~3 months. refresh_market_data task required.",
+    "india_in_demand": ["AI/ML", "cloud", "data science/analytics", "cybersecurity", "automation", "Python", "TensorFlow", "PyTorch"],
+    "global_trends": ["software eng listings +30% in 2026", "AI-skill roles pay 43% more", "new-grad big-tech hiring below 2019 levels", "top listed AI skills: LangChain, RAG, PyTorch"],
+    "tag": "verified_india / unverified_global"
+  }
+}
