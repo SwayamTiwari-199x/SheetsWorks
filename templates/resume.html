@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ resume_name }}</title>
+<style>
+/* ATS-safe by construction (RULES.md section 2):
+   single column, left aligned, no tables/boxes/icons, contact in the body,
+   body font from rules.json ats.fonts. Margins from ats.margins. */
+@page {
+  size: A4;
+  margin: {{ margin_inches }}in;
+}
+* { box-sizing: border-box; }
+body {
+  font-family: {{ font_family }};
+  font-size: {{ body_size_pt }}pt;
+  line-height: {{ line_height }};
+  color: #000;
+  margin: 0;
+  padding: 0;
+  text-align: left;
+}
+p, div, li { margin: 0; padding: 0; }
+h2 {
+  font-size: {{ body_size_pt + 0.5 }}pt;
+  text-transform: uppercase;
+  letter-spacing: 0.4pt;
+  margin: {{ heading_gap }}pt 0 2pt 0;
+  padding-bottom: 1pt;
+  border-bottom: 0.5pt solid #000;
+  page-break-after: avoid;
+}
+/* Literal hyphen, not a list marker: a generated bullet glyph extracts as
+   U+FFFD, which garbles ATS text extraction. RULES.md section 2. */
+.bullet { margin-left: 12pt; }
+.head { font-weight: bold; }
+.name { font-size: {{ body_size_pt + 4 }}pt; font-weight: bold; }
+.contact { margin-bottom: 2pt; }
+.meta { margin-bottom: 1pt; }
+.entry { margin-bottom: 2pt; page-break-inside: avoid; }
+</style>
+</head>
+<body>
+{% for kind, text in blocks %}
+{%- if kind == 'name' -%}
+<div class="name">{{ text }}</div>
+{%- elif kind == 'contact' -%}
+<div class="contact">{{ text }}</div>
+{%- elif kind == 'heading' -%}
+<h2>{{ text }}</h2>
+{%- elif kind == 'entry_header' -%}
+<div class="entry head">{{ text }}</div>
+{%- elif kind == 'entry_meta' -%}
+<div class="entry meta">{{ text }}</div>
+{%- elif kind == bullet_kind -%}
+<div class="bullet">{{ bullet_mark }} {{ text }}</div>
+{%- else -%}
+<div>{{ text }}</div>
+{%- endif -%}
+{% endfor %}
+</body>
+</html>

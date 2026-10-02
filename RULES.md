@@ -65,7 +65,8 @@ SOURCES: https://resumeatlas.io/resume-sections ; https://resumeoptimizerpro.com
 
 Section order:
 
-- **Experienced (tech):** Contact → Summary → Work Experience → Projects (if strong) → Skills → Education → Certifications.
+- **Experienced (tech):** Contact → Summary → Work Experience → Projects (if strong) → Skills → Education → Certifications → Achievements/Awards.
+  - *Amended 2026-10-03:* the original line stopped at Certifications and never said where an experienced candidate's achievements belong. Stage 2 found the gap the hard way — a renderer that iterated this list exactly dropped the Achievements section with no error. Achievements/Awards now sits last, which is the conventional placement. This placement is **our design decision, `unverified`** — the sources below describe section order but do not cover it.
 - **Student/fresher (tech):** Contact → Summary → Education → Projects → Internships/Experience → Skills → Certifications → Achievements/Awards. Freshers lead with education + projects because projects and internships are the experience section. —
   SOURCES: https://justcv.io/blogs/resume-examples-freshers/ ; https://www.resumefast.io/blog/fresher-resume-guide ; https://resources.instahyre.com/blog/how-to-list-projects-on-resume/ ; https://hexerhire.in/blog/entry-level-software-engineer-resume-2026-ats-project-guide — **verified**
 - General ATS-expected sequence: contact → summary → key skills → work experience → education → certifications. —
@@ -122,9 +123,9 @@ Do NOT build detector evasion (per SPEC). The research justifies this:
   SOURCE: https://careerbldr.com/blog/ai-resume-detection-hiring-managers/ — `unverified`
 - **Therefore the app's position:** the defense is (a) the user's own specific facts, numbers, and vocabulary, and (b) human review of every bullet — both already in the SPEC. No detector-tricks, ever.
 
-## 8. Job market snapshot (fresh as of 2026-10-02; expires 2027-01-02)
+## 8. Job market snapshot (fresh as of 2026-10-02; expires 2026-12-31)
 
-> **`refresh_market_data` task:** this block expires on **2027-01-02** (90 days after collection). The date is machine-readable in `rules.json` as `market_snapshot.stale_after`; re-run this section's searches after that. Do not show these figures to the user once the date has passed.
+> **`refresh_market_data` task:** this block expires on **2026-12-31** (90 days after collection). The date is machine-readable in `rules.json` as `market_snapshot.stale_after`, and `stale_after_days` is kept equal to it by test. Data is stale *on* that date. Do not show these figures to the user once it has passed.
 
 **India (2026):**
 - In-demand: AI/ML, cloud, data science/analytics, cybersecurity, automation. —

@@ -24,6 +24,17 @@ CREATE TABLE IF NOT EXISTS profile (
     body       TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Stage 2 needs one place to store a rendered-snapshot document so that
+-- POST /export/{version_id} has something to export. Listing, tailoring and
+-- the JD/application links are Stage 6/8 and deliberately not here.
+CREATE TABLE IF NOT EXISTS versions (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    jd_id      TEXT,
+    body       TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -88,5 +99,31 @@ def put_profile(body: dict[str, Any], profile_id: str = "default") -> dict[str, 
                ON CONFLICT(id) DO UPDATE SET body = excluded.body,
                                              updated_at = datetime('now')""",
             (profile_id, json.dumps(body)),
+        )
+    return body
+
+
+def get_version(version_id: str) -> dict[str, Any] | None:
+    with get_conn() as conn:
+        row = conn.execute("SELECT body FROM versions WHERE id = ?", (version_id,)).fetchone()
+    return json.loads(row["body"]) if row else None
+
+
+def put_version(body: dict[str, Any]) -> dict[str, Any]:
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO versions (id, name, jd_id, body, created_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET name    = excluded.name,
+                                             jd_id   = excluded.jd_id,
+                                             body    = excluded.body,
+                                             created_at = excluded.created_at""",
+            (
+                body["id"],
+                body["name"],
+                body.get("jd_id"),
+                json.dumps(body),
+                body.get("created_at", ""),
+            ),
         )
     return body

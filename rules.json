@@ -40,12 +40,17 @@
   },
   "section_order": {
     "student_fresher": ["contact", "summary", "education", "projects", "internships_experience", "skills", "certifications", "achievements_awards"],
-    "experienced": ["contact", "summary", "work_experience", "projects", "skills", "education", "certifications"],
+    "experienced": ["contact", "summary", "work_experience", "projects", "skills", "education", "certifications", "achievements_awards"],
+    "fallback_append": ["achievements_awards", "publications"],
+    "fallback_note": "RULES.md section 3 never said where an experienced candidate's achievements belong, so they were silently dropped by any renderer that iterated section_order exactly. achievements_awards is now listed for both levels, and fallback_append is the belt-and-braces rule: a populated section the order did not place is appended, never discarded. Data loss is not an acceptable rendering outcome.",
+    "achievements_placement_tag": "unverified",
+    "achievements_placement_note": "Position of Achievements for experienced candidates is our design decision, not a sourced rule. RULES.md section 3 lists the experienced order without it and does not cover the case. End of the resume is the conventional placement.",
     "tag": "verified"
   },
   "safe_headings": {
-    "acceptable": ["Summary", "Work Experience", "Experience", "Professional Experience", "Education", "Skills", "Technical Skills", "Core Competencies", "Projects", "Certifications", "Achievements", "Awards"],
+    "acceptable": ["Summary", "Work Experience", "Experience", "Professional Experience", "Education", "Skills", "Technical Skills", "Core Competencies", "Projects", "Certifications", "Achievements", "Awards", "Publications"],
     "avoid": ["My Journey", "What I Bring", "About Me", "Career Objective", "Extra-Curricular Activities (unclear variants)"],
+    "publications_note": "Publications is listed because SPEC section 3 defines an optional Publications section and it is a conventional ATS-recognised heading. The sourcing below does not cover it specifically, so treat that one entry as a design decision rather than a cited rule.",
     "tag": "verified"
   },
   "banned_phrases": [
@@ -128,9 +133,9 @@
   "market_snapshot": {
     "date": "2026-10-02",
     "stale_after_days": 90,
-    "stale_after": "2027-01-02",
+    "stale_after": "2026-12-31",
     "refresh_task": "refresh_market_data",
-    "stale_warning": "Machine-checkable: compare today against stale_after. If today > stale_after, this block is stale and must be re-researched before it is shown to the user.",
+    "stale_warning": "Machine-checkable: stale_after is the collected date plus stale_after_days, and data is stale ON that date. Compare today >= stale_after; if so this block must be re-researched before it is shown to the user.",
     "india_in_demand": ["AI/ML", "cloud", "data science/analytics", "cybersecurity", "automation", "Python", "TensorFlow", "PyTorch"],
     "global_trends": ["software eng listings +30% in 2026", "AI-skill roles pay 43% more", "new-grad big-tech hiring below 2019 levels", "top listed AI skills: LangChain, RAG, PyTorch"],
     "tag": "verified_india / unverified_global"

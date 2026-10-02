@@ -9,6 +9,10 @@
 *.db-shm
 logs/
 
+# manual inspection output (sample renders)
+out/
+exports/
+
 # python
 __pycache__/
 *.py[cod]
