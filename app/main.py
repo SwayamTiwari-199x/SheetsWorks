@@ -151,7 +151,17 @@ def put_profile(profile: Profile) -> Profile:
 # Versions and export (Stage 2)
 # --------------------------------------------------------------------------
 
-_SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
+# Filename sanitiser. Spaces are deliberately ALLOWED: the sheets convention is
+# "FirstName LastName Resume", so stripping them would defeat the very rule we
+# are implementing. Everything that could break out of the quoted
+# Content-Disposition header is removed instead.
+_SAFE_NAME = re.compile(r"[^A-Za-z0-9 ._-]+")
+_MULTI_SPACE = re.compile(r"\s+")
+
+
+def _clean_filename(value: str) -> str:
+    cleaned = _MULTI_SPACE.sub(" ", _SAFE_NAME.sub("_", value)).strip(" ._-")
+    return cleaned or "resume"
 
 
 @app.post("/versions", response_model=Version, status_code=201)
@@ -165,7 +175,11 @@ def create_version(version: Version) -> Version:
 
 
 @app.post("/versions/from-profile", response_model=Version, status_code=201)
-def snapshot_current_profile(name: str = "current", include_personal_details: bool = False) -> Version:
+def snapshot_current_profile(
+    name: str = "current",
+    include_personal_details: bool = False,
+    template: str = Query("blank", description="resume template name"),
+) -> Version:
     """Convenience: snapshot whatever is in /profile right now."""
     stored = db.get_profile(PROFILE_ID)
     if stored is None:
@@ -174,6 +188,7 @@ def snapshot_current_profile(name: str = "current", include_personal_details: bo
         name=name,
         profile_snapshot=Profile.model_validate(stored),
         include_personal_details=include_personal_details,
+        template=template,
     )
     return Version.model_validate(db.put_version(version.model_dump(mode="json")))
 
@@ -202,8 +217,12 @@ def export_version(
     version = Version.model_validate(stored)
     doc = build_doc_from_version(version)
 
-    limit = rules.page_limit(doc.level)
-    headers = {"X-Page-Limit": str(limit), "Cache-Control": "no-store"}
+    limit = _page_limit_for(doc, version.template)
+    headers = {
+        "X-Page-Limit": str(limit),
+        "X-Template": rules.template(version.template).get("label", version.template).split(" -")[0],
+        "Cache-Control": "no-store",
+    }
     if fmt == "pdf":
         payload, pages, density = render_pdf_report(doc, max_pages=limit)
         headers["X-Pages"] = str(pages)
@@ -221,7 +240,7 @@ def export_version(
     else:
         payload = RENDERERS[fmt](doc)
 
-    stem = _SAFE_NAME.sub("_", version.name or version_id).strip("._-") or "resume"
+    stem = _export_filename(version, fmt)
     headers["Content-Disposition"] = f'attachment; filename="{stem}.{fmt}"'
     return Response(
         content=payload,
@@ -236,7 +255,10 @@ def export_version(
 
 
 @app.post("/preview")
-def preview_current_profile(profile: Profile) -> Response:
+def preview_current_profile(
+    profile: Profile,
+    template: str = Query("blank", description="resume template name"),
+) -> Response:
     """Render the profile the caller just sent, without storing a version.
 
     Deliberately takes the body rather than reading /profile: the terminal
@@ -245,8 +267,8 @@ def preview_current_profile(profile: Profile) -> Response:
     preview is the real artifact and not an HTML approximation that could
     quietly disagree with the exported file.
     """
-    doc = build_doc(profile)
-    limit = rules.page_limit(doc.level)
+    doc = build_doc(profile, template=template)
+    limit = _page_limit_for(doc, template)
     payload, pages, density = render_pdf_report(doc, max_pages=limit)
     return Response(
         content=payload,
@@ -257,7 +279,38 @@ def preview_current_profile(profile: Profile) -> Response:
             "X-Page-Budget": "over" if pages > limit else "ok",
             "X-Density": density,
             "X-Level": doc.level,
+            "X-Template": template,
             "Cache-Control": "no-store",
             "Content-Disposition": "inline",
         },
     )
+
+
+def _page_limit_for(doc, template: str) -> int:
+    """Page budget for this resume.
+
+    A template may be stricter than the researched default -- the sheets
+    template demands one page even for experienced candidates, per its source.
+    """
+    spec = rules.template(template)
+    return int(spec.get("max_pages") or rules.page_limit(doc.level))
+
+
+def _export_filename(version, fmt: str) -> str:
+    """Filename per the active template's convention.
+
+    The sheets source is emphatic that this must be "FirstName LastName Resume"
+    and never "(Project Management)", "Final" or a year, so that is data in
+    rules.json rather than a name built here.
+    """
+    spec = rules.template(version.template)
+    pattern = spec.get("filename_pattern") or "{name}"
+    parts = [p for p in str(version.name or "").split() if p]
+    if not parts:
+        full = "resume"
+    elif len(parts) == 1:
+        full = parts[0]
+    else:
+        full = f"{parts[0]} {parts[-1]}"
+    rendered = pattern.replace("{name}", full)
+    return _clean_filename(rendered)

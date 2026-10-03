@@ -81,7 +81,7 @@ const fetchStub = async (path, opts) => {
     server.profile = JSON.parse(opts.body); server.saved = server.profile;
     return okResp(server.profile);
   }
-  if (path === '/preview') {
+  if (path === '/preview' || path.indexOf('/preview?') === 0) {
     server.previewCalls++;
     return { ok:true, status:200, headers:{get:h=>H[h]}, blob: async () => ({ size: 1 }) };
   }
@@ -89,7 +89,10 @@ const fetchStub = async (path, opts) => {
     return okResp({ id:'aaaaaaaaaaaa', name:'resume' });
   }
   if (path.indexOf('/export/') === 0) {
-    return { ok:true, status:200, headers:{get:h=>H[h]}, blob: async () => ({ size: 1 }) };
+    return { ok:true, status:200,
+      headers:{get:h=>({'x-pages':'1','x-page-limit':'1','x-page-budget':'ok',
+                        'content-disposition':'attachment; filename="Dusht Resume.pdf"'})[h]},
+      blob: async () => ({ size: 1 }) };
   }
   throw new Error('unhandled ' + path);
 };
@@ -427,8 +430,10 @@ def test_contact_draft_updates_an_existing_contact() -> None:
 
 
 def test_summary_draft_updates_the_single_value() -> None:
+    """Regression: this used to store {text: ...} into a plain string field."""
     r = drive(["draft summary", "text A new summary line.", "done", "save"], BASE)
-    assert r["profile"]["summary"]["text"] == "A new summary line."
+    assert r["profile"]["summary"] == "A new summary line."
+    assert isinstance(r["profile"]["summary"], str)
 
 
 def test_cancel_discards_the_draft() -> None:
@@ -454,7 +459,8 @@ def test_edit_a_list_entry_persists() -> None:
 def test_edit_a_single_value_section_persists() -> None:
     """Regression: this used to read state.draft after nulling it and no-op."""
     r = drive(["cd summary", "edit text A brand new summary.", "save"], BASE)
-    assert r["profile"]["summary"]["text"] == "A brand new summary."
+    assert r["profile"]["summary"] == "A brand new summary."
+    assert isinstance(r["profile"]["summary"], str)
 
 
 def test_edit_contact_persists() -> None:
@@ -583,6 +589,122 @@ def test_preview_off() -> None:
     assert has(r, "preview off")
 
 
+# --- resume templates and interests ---------------------------------------
+
+
+def test_template_lists_both_options() -> None:
+    r = drive(["template"], BASE)
+    assert has(r, "blank")
+    assert has(r, "sheets")
+    assert has(r, "no summary, one Interests line at the end")
+
+
+def test_template_switches() -> None:
+    r = drive(["template sheets"], BASE)
+    assert has(r, "template: sheets", "ok")
+    assert has(r, "summary is hidden")
+
+
+def test_template_typo_suggests() -> None:
+    r = drive(["template sheeets"], BASE)
+    assert has(r, "no such template")
+    assert has(r, "did you mean `sheets`")
+
+
+def test_template_same_is_a_no_op() -> None:
+    r = drive(["template blank"], BASE)
+    assert has(r, "already using blank")
+
+
+def test_template_warns_when_interests_is_empty() -> None:
+    empty = json.loads(json.dumps(BASE))
+    empty["interests"] = ""
+    r = drive(["template sheets"], empty)
+    assert has(r, "Interests is still empty")
+
+
+def test_template_warns_when_interests_is_filled() -> None:
+    filled = json.loads(json.dumps(BASE))
+    filled["interests"] = "Trail running and chess."
+    r = drive(["template sheets"], filled)
+    assert not has(r, "Interests is still empty")
+
+
+def test_summary_section_warns_it_is_not_printed() -> None:
+    r = drive(["cd summary"], BASE)
+    r2 = drive(["template sheets", "cd summary"], BASE)
+    assert has(r2, "does not print this")
+
+
+def test_interests_section_says_which_template_prints_it() -> None:
+    r = drive(["cd interests"], BASE)
+    assert has(r, "only printed by the `sheets` template")
+
+
+def test_profile_shows_what_is_actually_printed() -> None:
+    r = drive(["profile"], BASE)
+    assert has(r, "printed")
+    row = [ln for ln in r["lines"] if ln.startswith("[line out] summary")]
+    assert row, "summary row missing"
+    assert "yes" in row[0]
+
+
+def test_profile_marks_hidden_sections() -> None:
+    r = drive(["template sheets", "profile"], BASE)
+    row = [ln for ln in r["lines"] if ln.startswith("[line out] summary")]
+    assert row and "no" in row[0], row
+
+
+def test_home_does_not_suggest_a_section_the_template_hides() -> None:
+    """Blank profile: suggesting Interests first would be nonsense."""
+    blank = {"contact": {"name": "", "email": "", "phone": ""}, "summary": "",
+             "interests": "", "education": [], "experience": [], "projects": [],
+             "skills": [], "certifications": [], "achievements": [],
+             "extracurriculars": [], "publications": []}
+    r = drive(["home"], blank)
+    assert has(r, "start here: draft contact")
+
+
+def test_interests_saves_and_is_a_single_line() -> None:
+    r = drive(["draft interests", "text Trail running, chess, and keyboards.",
+               "done", "save"], BASE)
+    assert has(r, "interests updated", "ok")
+    assert r["profile"]["interests"] == "Trail running, chess, and keyboards."
+
+
+def test_interests_replaces_rather_than_appends() -> None:
+    r = drive(["cd interests", "edit text Chess and running.",
+               "save"], BASE)
+    assert r["profile"]["interests"] == "Chess and running."
+
+
+def test_template_does_not_delete_anything() -> None:
+    """Switching is a print decision, never a data loss."""
+    filled = json.loads(json.dumps(BASE))
+    filled["summary"] = "A summary that must survive."
+    filled["interests"] = "Chess."
+    r = drive(["template sheets", "save"], filled)
+    assert r["profile"]["summary"] == "A summary that must survive."
+    assert r["profile"]["interests"] == "Chess."
+    r2 = drive(["template blank", "save"], filled)
+    assert r2["profile"]["summary"] == "A summary that must survive."
+
+
+def test_help_template_explains_the_disagreement() -> None:
+    r = drive(["help template"], BASE)
+    assert has(r, "RULES.md section 3a")
+    assert has(r, "never deletes anything")
+
+
+def test_template_is_in_the_navbar() -> None:
+    assert "add('template', 'template'" in APP_JS.read_text(encoding="utf-8")
+
+
+def test_help_mentions_template() -> None:
+    r = drive(["help"], BASE)
+    assert has(r, "template [name]")
+
+
 # --- resilience ------------------------------------------------------------
 
 
@@ -616,7 +738,10 @@ def test_export_flow_snapshots_then_downloads() -> None:
     paths = [c["path"] for c in r["calls"]]
     assert any("/versions/from-profile" in p for p in paths)
     assert any("/export/" in p for p in paths)
-    assert has(r, "downloaded resume.pdf", "ok")
+    # The active template travels with the snapshot request.
+    assert any("template=blank" in p for p in paths), paths
+    # The server's filename wins, because it applies the template convention.
+    assert has(r, "downloaded Dusht Resume.pdf", "ok")
 
 
 def test_export_rejects_a_bad_format() -> None:

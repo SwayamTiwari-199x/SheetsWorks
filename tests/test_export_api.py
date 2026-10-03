@@ -90,8 +90,11 @@ def test_export_filename_is_sanitised(client: TestClient, seeded: str) -> None:
     assert "\r" not in disp and "\n" not in disp
     # The quotes in the header are our own delimiters; the *value* must be inert.
     inner = disp.split("filename=", 1)[1].strip('"')
-    for ch in ('"', "/", "\\", ";", " ", "#"):
+    for ch in ('"', "/", "\\", ";", "#"):
         assert ch not in inner, f"{ch!r} survived into the filename: {inner!r}"
+    # Spaces are allowed on purpose -- "FirstName LastName Resume" needs them --
+    # but runs collapse to one and the ends are trimmed.
+    assert "  " not in inner and inner == inner.strip()
     assert inner.endswith(".txt")
 
 

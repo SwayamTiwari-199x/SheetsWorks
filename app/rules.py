@@ -54,6 +54,7 @@ def heading(section: str) -> str:
         # Freshers put internships under Experience: "Internships" is not on the
         # safe list and ATS parsers expect "Experience".
         "internships_experience": "Experience",
+        "interests": "Interests",
     }
     try:
         label = table[section]
@@ -81,6 +82,46 @@ def fallback_append() -> list[str]:
     section_order exactly once dropped whatever was missing.
     """
     return list(load_rules()["section_order"].get("fallback_append", []))
+
+
+# --- resume templates -----------------------------------------------------
+# A template decides which sections appear and in what order. Both are defined in
+# rules.json so the renderer never hardcodes a convention (CLAUDE.md rule 4), and
+# so the two genuinely conflicting sources stay visible side by side.
+
+
+def template_names() -> list[str]:
+    return [k for k in load_rules()["resume_templates"] if k not in ("default", "why_not_merge")]
+
+
+def default_template() -> str:
+    return load_rules()["resume_templates"]["default"]
+
+
+def template(name: str | None = None) -> dict:
+    """The template definition, falling back to the default for unknown names.
+
+    Falling back matters: Version rows written before templates existed carry
+    "ats", which is not a template, and those versions must still export.
+    """
+    templates = load_rules()["resume_templates"]
+    chosen = name or templates["default"]
+    if chosen not in templates:
+        chosen = templates["default"]
+    return templates[chosen]
+
+
+def template_order(name: str | None, level: str) -> list[str]:
+    spec = template(name)
+    key = "student_fresher" if level == "student" else "experienced"
+    orders = spec["orders"]
+    if isinstance(orders[key], list):
+        return list(orders[key])
+    # Orders that alias the researched default. section_order() takes the LEVEL,
+    # not the key -- passing the key here silently returned the experienced
+    # layout for students, which put Education after Skills and dropped their
+    # internships entirely.
+    return section_order("student" if key == "student_fresher" else "experienced")
 
 
 # --- layout / limits -------------------------------------------------------

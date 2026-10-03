@@ -75,14 +75,21 @@ def _contact_lines(profile: Profile) -> list[str]:
     return [line] if line else []
 
 
-def build_doc(profile: Profile, *, include_personal_details: bool = False) -> Doc:
+def build_doc(
+    profile: Profile,
+    *,
+    include_personal_details: bool = False,
+    template: str | None = None,
+) -> Doc:
     """Flatten a Profile into the canonical document.
 
-    Personal details are opt-in and off by default (SPEC section 4). They are
-    read from the profile as text only; no file path is ever opened.
+    The template decides which sections appear and in what order; both come from
+    rules.json, never from this file. Personal details are opt-in and off by
+    default (SPEC section 4), and are read as text only -- no path is opened.
     """
     level = detect_level(profile)
-    order = rules.section_order(level)
+    spec = rules.template(template)
+    order = rules.template_order(template, level)
 
     # group work vs internships so both can occupy their own slot
     jobs = [e for e in profile.experience if e.type == "job"]
@@ -94,6 +101,14 @@ def build_doc(profile: Profile, *, include_personal_details: bool = False) -> Do
         "summary",
         rules.heading("summary"),
         [Entry(header="", meta=profile.summary)] if profile.summary else [],
+    )
+
+    # One free-text line, rendered as "Interests: ..." — only in templates that
+    # ask for it (see rules.json resume_templates).
+    by_key["interests"] = Section(
+        "interests",
+        rules.heading("interests"),
+        [Entry(header="", meta=profile.interests)] if profile.interests else [],
     )
 
     def work_section(key: str, items) -> Section:
@@ -187,6 +202,14 @@ def build_doc(profile: Profile, *, include_personal_details: bool = False) -> Do
         "publications", rules.heading("publications"), simple(profile.publications)
     )
 
+    # A template may deliberately exclude a section (sheets drops the summary).
+    # That is the template speaking, not data loss, so it is applied before the
+    # no-data-loss fallback below.
+    if not spec.get("include_summary", True):
+        by_key.pop("summary", None)
+    if not spec.get("include_interests", False):
+        by_key.pop("interests", None)
+
     sections = [by_key[key] for key in order if key in by_key]
 
     # Honouring section_order must not mean silently dropping the user's data:
@@ -198,6 +221,12 @@ def build_doc(profile: Profile, *, include_personal_details: bool = False) -> Do
         for key in rules.fallback_append()
         if key not in placed and by_key[key].entries
     )
+
+    # Interests is explicitly last when the template asks for it.
+    if spec.get("include_interests"):
+        sections = [s for s in sections if s.key != "interests"]
+        if by_key["interests"].entries:
+            sections.append(by_key["interests"])
 
     contact = _contact_lines(profile)
     if include_personal_details:
@@ -233,4 +262,5 @@ def build_doc_from_version(version: Version) -> Doc:
     return build_doc(
         version.profile_snapshot,
         include_personal_details=version.include_personal_details,
+        template=version.template,
     )

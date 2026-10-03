@@ -75,6 +75,25 @@ Section order:
 Open-source contributions can be listed under Projects or a separate "Open Source" section for tech roles; when substantial, "Experience" is defensible. —
 SOURCES: https://www.reddit.com/r/developersIndia/comments/1qg5aax/open_source_contributions_on_resume_experience_or/ ; https://www.quora.com/If-I-contribute-to-an-open-source-project-as-a-fresher-can-I-add-it-to-my-resume — `unverified`
 
+### 3a. The "sheets" template — an unresolved disagreement
+
+Added 2026-10-03 at the user's request, from a widely-used third-party format. Deliberately kept separate from section order above rather than merged into it.
+
+- **No summary or objective.** The source is explicit: *"Don't put an objective section or summary. It'll be skipped, and it's space that can be used better."* This **directly contradicts** the verified sources above, which place Summary second in both orders. The disagreement is not resolved here — it is recorded, tagged, and the user picks. — `unverified`
+  SOURCE: https://www.reddit.com/r/jobs/comments/1c1mqp0/ (u/SheetsGiggles, self-described former Fortune 100 recruiter) ; https://sheetsresume.com/advice
+- **A single-line `Interests:` entry at the very end, underneath Skills.** The source's stated reasons: (1) it forces the screener to see you as a human rather than one of thousands of faceless CVs; (2) it lets them picture you as a coworker, since they will spend 40 hours a week with you; (3) it is a ready-made interview icebreaker. — `unverified`
+  SOURCE: same as above.
+- **File named `FirstName LastName Resume`** and nothing else — never "(Project Management)", "Final", or a year. — `unverified`
+  SOURCE: same as above.
+- **One page unless you have 20+ years of experience.** Stricter than our verified page limits (1 page student/fresher, 2 pages experienced). — `unverified`
+  SOURCE: same as above.
+- **Black and white only; no columns, quadrants or sidebars.** Agrees with our verified single-column rules, so no conflict. — **verified** (our own §2 sources)
+- **The human screener, not the ATS, is the real gate.** *"The ATS isn't the 'great filter'... the human screener is."* This **independently agrees** with our own §2 finding that ATS auto-rejection is overstated — reached from an entirely different direction: a screening company's guidance to its clients rather than a recruiter survey. Two unrelated sources landing in the same place is the strongest signal in this document. — **verified**
+- **Tailor lightly:** current or past job titles, the first bullet, and skill order. *"Don't change too much from job to job: you'll drive yourself insane."* — `unverified`
+  SOURCE: same as above.
+- Titles may be adjusted to match the target role without misrepresenting — e.g. "Software Engineer" to "Front-End Software Engineer". Relevant to Stage 6, and must never invent a title the user did not actually hold. — `unverified`
+  SOURCE: same as above.
+
 ## 4. Bullet writing rules
 
 - **Structure:** action verb + what you did + how (tool/method) + measurable result. Google recruiter-endorsed X-Y-Z formula: "Accomplished [X] as measured by [Y] by doing [Z]". —

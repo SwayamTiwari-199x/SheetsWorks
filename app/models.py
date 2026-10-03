@@ -299,6 +299,10 @@ class Profile(StrictModel):
     id: str = Field(default_factory=new_id)
     contact: Contact
     summary: str = Field(default="", max_length=4000)
+    # One free-text line, rendered as "Interests: ..." at the very end of the
+    # sheets template. Deliberately a string, not a list: the source describes a
+    # single line, and a structured list would invite more than that.
+    interests: str = Field(default="", max_length=500)
     education: list[Education] = Field(default_factory=list, max_length=MAX_LIST)
     experience: list[Experience] = Field(default_factory=list, max_length=MAX_LIST)
     projects: list[Project] = Field(default_factory=list, max_length=MAX_LIST)
@@ -328,7 +332,9 @@ class Version(StrictModel):
     name: str = Field(min_length=1, max_length=200)
     profile_snapshot: Profile
     jd_id: str | None = None
-    template: str = "ats"
+    # Which resume template to render with. Defined in rules.json
+    # resume_templates; unknown values fall back to the default.
+    template: str = Field(default="blank", max_length=40)
     created_at: str = Field(default_factory=lambda: date.today().isoformat())
     validation_report: ValidationReport | None = None
     # Legacy biodata rendering is opt-in per version (SPEC section 4).

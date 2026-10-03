@@ -24,7 +24,7 @@ const FORMATS = ['pdf', 'docx', 'txt'];
 // Menu order for the navbar. This is navigation order only; the order sections
 // appear on the rendered resume comes from rules.json section_order, server-side.
 const SECTION_ORDER = [
-  'contact', 'summary', 'experience', 'projects',
+  'contact', 'summary', 'interests', 'experience', 'projects',
   'skills', 'education', 'certifications', 'achievements',
   'extracurriculars', 'publications',
 ];
@@ -33,6 +33,7 @@ const SECTION_ORDER = [
 const SECTIONS = {
   contact:         { list: false, fields: ['name', 'email', 'phone', 'city', 'country', 'link'] },
   summary:         { list: false, fields: ['text'] },
+  interests:       { list: false, fields: ['text'] },
   education:       { list: true,  fields: ['institution', 'degree', 'field', 'start', 'end', 'grade', 'scale', 'course'] },
   experience:      { list: true,  fields: ['org', 'role', 'type', 'location', 'start', 'end', 'bullet'] },
   projects:        { list: true,  fields: ['name', 'role', 'start', 'end', 'tech', 'bullet', 'link'] },
@@ -58,6 +59,14 @@ const SECTION_INFO = {
     what: 'Two or three lines saying who you are and your strongest evidence.',
     do: 'draft summary',
     then: 'then type: text <your summary>, then done',
+    skip: 'The sheets template leaves this out — its source says a summary gets skipped.',
+  },
+  interests: {
+    what: 'One line at the very end. Its source says it makes you memorable and gives the interviewer an easy opener.',
+    do: 'draft interests',
+    then: 'then type: text <things you actually do>, then done',
+    only: 'sheets',
+    tip: 'example: Trail running, chess, and rebuilding mechanical keyboards.',
   },
   experience: {
     what: 'Jobs you were paid for. One entry per role, most recent first.',
@@ -189,6 +198,16 @@ const SAMPLE_PROFILE = {
 };
 
 // ---------------------------------------------------------------- state
+
+// Which resume template is active. The section list, page budget and filename
+// convention all live in rules.json (resume_templates); the app only remembers
+// which one you picked, and warns when a section the current template hides is
+// still empty.
+const TEMPLATE_BLURB = {
+  blank: 'every section, including a summary',
+  sheets: 'no summary, one Interests line at the end',
+};
+let activeTemplate = 'blank';
 
 const state = {
   profile: null,
@@ -353,13 +372,23 @@ function didYouMean(input, candidates) {
   return bestScore <= tolerance ? best : null;
 }
 
+// Sections the model stores as a plain string, not an object. The draft
+// machinery works on objects, so these are adapted on the way out and unwrapped
+// on the way in. Getting this wrong put {text: "..."} into a string field, which
+// the API rejects and the renderer would print as [object Object].
+const PLAIN_TEXT_SECTIONS = new Set(['summary', 'interests']);
+
 const sectionsOf = (profile) => SECTION_ORDER.filter((s) => s in SECTIONS);
 const entriesFor = (section) => {
   if (!state.profile) return [];
   const value = state.profile[section];
   if (value === undefined || value === null) return [];
+  if (PLAIN_TEXT_SECTIONS.has(section)) {
+    return [{ text: String(value) }];
+  }
   return Array.isArray(value) ? value : [value];
 };
+
 const isList = (section) => !!(SECTIONS[section] && SECTIONS[section].list);
 
 // Does this section hold anything a reader would see? An empty contact object
@@ -408,6 +437,13 @@ function guide(section) {
     out('  view: `cat ' + section + '`    add another: `' + info.do + '`', 'hint');
   }
   if (info.tip) out('  tip: ' + info.tip, 'dim');
+  if (info.only && info.only !== activeTemplate) {
+    out('  note: only printed by the `' + info.only + '` template.', 'dim');
+    out('        `template ' + info.only + '` to switch.', 'hint');
+  }
+  if (info.skip && info.skip.indexOf(activeTemplate) !== -1) {
+    out('  note: the `' + activeTemplate + '` template does not print this.', 'dim');
+  }
   if (!isList(section)) {
     out('  change it any time: `edit ' + section + ' <field> <value>`', 'dim');
   } else {
@@ -516,12 +552,29 @@ function refreshNavbar() {
     }
   }
   add('notes', 'notes', notesCount(), false);
+  add('template', 'template', activeTemplate, false);
   add('hint', 'hint', null, false);
   add('help', 'help', null, false);
   add('preview', 'preview', null, state.previewOn);
 }
 
 const notesCount = () => (store.get('rb.notes', []) || []).length;
+
+// Which sections the active template will actually print. Mirrors the
+// include_summary / include_interests flags in rules.json resume_templates.
+// Deliberately a top-level helper, not a command: it is not something a user
+// types, and putting it in COMMANDS made `profile` throw.
+function sectionPrinted(section) {
+  if (section === 'summary') return activeTemplate === 'blank';
+  if (section === 'interests') return activeTemplate === 'sheets';
+  return true;
+}
+
+// The active template has to travel with every render request, or the preview
+// would quietly disagree with what export produces.
+const snapshotUrl = (name) =>
+  '/versions/from-profile?name=' + encodeURIComponent(name)
+  + '&template=' + encodeURIComponent(activeTemplate);
 
 function runTyped(command) {
   el.input.value = command;
@@ -543,7 +596,7 @@ async function doPreview() {
   if (!state.profile) return;
   const seq = ++state.previewSeq;
   try {
-    const resp = await fetch('/preview', {
+    const resp = await fetch('/preview?template=' + encodeURIComponent(activeTemplate), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(state.profile),
@@ -687,7 +740,10 @@ function finishDraft() {
     arr.push(entry);
     ok('added to ' + section + ' (' + arr.length + ' entries)');
   } else {
-    state.profile[section] = entry;
+    // String-backed sections must receive a string, not {text: ...}.
+    state.profile[section] = PLAIN_TEXT_SECTIONS.has(section)
+      ? String(entry.text || '')
+      : entry;
     ok(section + ' updated');
   }
   state.draft = null;
@@ -760,7 +816,8 @@ const COMMANDS = {
     );
     outLines('', 'out');
 
-    const missing = sectionsOf(state.profile).filter((s) => !hasContent(s));
+    const missing = sectionsOf(state.profile).filter(
+      (s) => !hasContent(s) && sectionPrinted(s));
     if (missing.length) {
       out('nothing started yet in ' + missing.length + ' section' + (missing.length > 1 ? 's' : '') + '.', 'dim');
       const first = missing[0];
@@ -925,11 +982,16 @@ const COMMANDS = {
     const c = p.contact || {};
     out(c.name || '(no name)', 'out');
     dim([c.email, c.phone, c.city, c.country].filter(Boolean).join(' | '));
-    const rows = SECTION_ORDER.map((s) => ({ section: s, entries: entriesFor(s).length }));
+    const rows = SECTION_ORDER.map((s) => ({
+      section: s,
+      entries: visibleCount(s),
+      printed: sectionPrinted(s) ? 'yes' : 'no',
+    }));
     out('', 'out');
-    table(rows, ['section', 'entries']);
+    table(rows, ['section', 'entries', 'printed']);
     const bullets = countBullets();
     out('', 'out');
+    dim('template: ' + activeTemplate + '  (' + TEMPLATE_BLURB[activeTemplate] + ')');
     dim(bullets + ' bullets across ' + rows.filter((r) => r.entries).length + ' sections');
   },
 
@@ -1108,11 +1170,14 @@ const COMMANDS = {
       snapshotForUndo();
       // Mutate in place, then write the same object back. Reading state.draft
       // after clearing it used to discard the edit entirely.
-      const scratch = { section: section, entry: state.profile[section] || {}, listMode: false };
+      const current = state.profile[section] || {};
+      const scratch = { section: section, entry: current, listMode: false };
       state.draft = scratch;
       try { dim(applyField(section, field, value)); } catch (err) { errorOut(err.message); }
       state.draft = null;
-      state.profile[section] = scratch.entry;
+      state.profile[section] = PLAIN_TEXT_SECTIONS.has(section)
+        ? String(scratch.entry.text || '')
+        : scratch.entry;
     }
     scheduleSave();
   },
@@ -1122,6 +1187,41 @@ const COMMANDS = {
   // A scratchpad for half-remembered facts. Deliberately NOT part of the
   // profile: these are the raw thoughts that Stage 4's AI will later turn into
   // bullets, so they must not pollute the resume itself.
+  template(args) {
+    const want = (args[0] || '').toLowerCase();
+    if (!want) {
+      out('resume template: ' + activeTemplate, 'hint');
+      out('  blank   ' + TEMPLATE_BLURB.blank, 'out');
+      out('  sheets  ' + TEMPLATE_BLURB.sheets, 'out');
+      dim('  `template sheets` to switch. Nothing you have written is ever lost —');
+      dim('  a template only decides what gets printed.');
+      return;
+    }
+    if (!TEMPLATE_BLURB[want]) {
+      errorOut('no such template: ' + want);
+      const guess = didYouMean(want, Object.keys(TEMPLATE_BLURB));
+      if (guess) out('did you mean `' + guess + '`?', 'hint');
+      return;
+    }
+    if (want === activeTemplate) {
+      dim('already using ' + want);
+      return;
+    }
+    activeTemplate = want;
+    store.set('rb.template', want);
+    ok('template: ' + want + '  (' + TEMPLATE_BLURB[want] + ')');
+    if (want === 'sheets') {
+      out('  summary is hidden and Interests is printed last.', 'dim');
+      if (!String((state.profile && state.profile.interests) || '').trim()) {
+        out('  Interests is still empty — `draft interests` to fill it in.', 'hint');
+      }
+    } else {
+      out('  summary is shown again, Interests is not printed.', 'dim');
+    }
+    scheduleSave();
+    refreshPreviewSoon();
+  },
+
   notes(args) {
     const all = store.get('rb.notes', []);
     const verb = (args[0] || '').toLowerCase();
@@ -1222,10 +1322,11 @@ const COMMANDS = {
   snapshot(args) {
     const name = args.join(' ') || 'snapshot';
     return withBusy('saving snapshot…', async () => {
-      const resp = await api('/versions/from-profile?name=' + encodeURIComponent(name), { method: 'POST' });
+      const resp = await api(snapshotUrl(name), { method: 'POST' });
       const body = await resp.json();
       state.lastSnapshot = body;
-      ok('snapshot "' + body.name + '" saved as ' + body.id.slice(0, 8));
+      ok('snapshot "' + body.name + '" saved as ' + body.id.slice(0, 8)
+        + '  (template: ' + body.template + ')');
     });
   },
 
@@ -1236,8 +1337,13 @@ const COMMANDS = {
       return;
     }
     return withBusy('rendering ' + fmt + '…', async () => {
-      const name = args.slice(1).join(' ') || 'resume';
-      const snap = await api('/versions/from-profile?name=' + encodeURIComponent(name), { method: 'POST' });
+      // Name the snapshot after the user, not "resume": the sheets template
+      // names files "FirstName LastName Resume", and the server applies that
+      // convention from rules.json. Here we only supply the human part.
+      const person = [state.profile && state.profile.contact
+        ? state.profile.contact.name : ''].join(' ').trim();
+      const name = args.slice(1).join(' ') || person || 'resume';
+      const snap = await api(snapshotUrl(name), { method: 'POST' });
       const version = await snap.json();
       const resp = await api('/export/' + version.id + '?format=' + fmt, { method: 'POST' });
       const pages = resp.headers.get('X-Pages');
@@ -1245,11 +1351,16 @@ const COMMANDS = {
       const budget = resp.headers.get('X-Page-Budget');
       if (pages) {
         if (budget === 'over') errorOut(pages + '/' + limit + ' pages — OVER BUDGET');
-        else ok(pages + '/' + limit + ' pages');
+        else ok(pages + '/' + limit + ' pages  (template: ' + activeTemplate + ')');
       }
       const blob = await resp.blob();
-      downloadBlob(blob, name + '.' + fmt);
-      ok('downloaded ' + name + '.' + fmt);
+      // Prefer the filename the server chose; it follows the template's rule.
+      // Guarded, because a missing header must not throw and lose the download.
+      const disp = resp.headers.get('content-disposition') || '';
+      const match = /filename="([^"]+)"/.exec(disp);
+      const serverName = match ? match[1] : null;
+      downloadBlob(blob, serverName || (name + '.' + fmt));
+      ok('downloaded ' + (serverName || name + '.' + fmt));
     });
   },
 };
@@ -1330,8 +1441,9 @@ const HELP_TEXT = [
   '    snapshot [name]     store a version you can return to',
   '    reset --force       empty the profile',
   '',
-  '  LOOK',
+  '  LOOK AND FORMAT',
   '    theme [name]        amber, green, matrix, paper',
+  '    template [name]     blank (everything) or sheets (no summary, Interests last)',
   '    clear               clear the screen',
   '',
   'Not sure what something means? `help <command>`, e.g. `help cat`.',
@@ -1470,6 +1582,22 @@ const HELP_TOPICS = {
          '    grep redis'],
   hint: ['hint   what to do next, based on what you have and where you are', ''],
   profile: ['profile   a summary of the whole resume, with entry counts', ''],
+  template: [
+    'template [blank|sheets]',
+    '',
+    '  Which resume format gets printed. Both are kept because two credible',
+    '  sources disagree -- see RULES.md section 3a.',
+    '',
+    '    blank   every section, including a summary. The researched default.',
+    '    sheets  no summary, and a one-line Interests entry at the very end.',
+    '            That source argues a summary "will be skipped", and that',
+    '            Interests makes you memorable and gives an easy opener.',
+    '',
+    '  Switching never deletes anything: the summary and your interests stay in',
+    '  your profile, they are just not printed by the template you are not using.',
+    '  `profile` shows a printed yes/no column so nothing is a surprise.',
+    '  Exported files are named per template -- sheets uses "First Last Resume".',
+  ],
   clear: ['clear   wipe the screen', ''],
 };
 
@@ -1670,6 +1798,8 @@ window.addEventListener('unhandledrejection', (ev) => {
 async function boot() {
   const saved = store.get('rb.theme', null);
   if (THEMES.includes(saved)) document.documentElement.setAttribute('data-theme', saved);
+  const savedTemplate = store.get('rb.template', null);
+  if (TEMPLATE_BLURB[savedTemplate]) activeTemplate = savedTemplate;
   state.history = store.get('rb.history', []);
 
   const ascii = document.createElement('div');
