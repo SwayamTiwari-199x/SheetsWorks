@@ -154,11 +154,23 @@ def health() -> dict[str, str]:
 
 
 @app.get("/profile", response_model=Profile)
-def get_profile() -> Profile:
+def get_profile() -> Response:
+    """The stored profile.
+
+    Sent no-store, like every other response that can carry personal details.
+    Exports and previews already were; this one was not, which meant a resume --
+    name, email, phone -- could be left sitting in a disk cache or a shared
+    proxy. Found by sweeping every response for the header instead of assuming
+    the ones we remembered had it.
+    """
     data = db.get_profile(PROFILE_ID)
     if data is None:
         raise HTTPException(status_code=404, detail="no profile yet; PUT /profile first")
-    return Profile.model_validate(data)
+    return Response(
+        content=Profile.model_validate(data).model_dump_json(),
+        media_type="application/json",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.put("/profile", response_model=Profile)

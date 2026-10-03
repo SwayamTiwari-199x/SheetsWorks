@@ -112,8 +112,9 @@ async function working(winId, label, fn) {
 
 const DESKTOP_ICONS = [
   { label: 'My Resume',  icon: 'resume',  run: () => openEditor() },
+  { label: 'Sample Resume', icon: 'notepad', run: () => loadSample() },
   { label: 'File Manager', icon: 'folder', run: () => openFileManager() },
-  { label: 'Read Me',     icon: 'notepad', run: () => openReadMe() },
+  { label: 'Read Me',     icon: 'help',    run: () => openReadMe() },
   { label: 'Preview',     icon: 'find',    run: () => openPreview() },
   { label: 'Display',     icon: 'display', run: () => openDisplay() },
   { label: 'Sheetsworks', icon: 'computer', run: () => openAbout() },
@@ -497,7 +498,10 @@ async function refreshPreview(winId) {
     if (frame.src && frame.src.startsWith('blob:')) URL.revokeObjectURL(frame.src);
     const url = URL.createObjectURL(blob);
     frame.src = url;
-    if (openLink) openLink.href = url;
+    // setAttribute, not a property write. Assigning a#href reads it back
+    // resolved against the document, so the handler stored the page URL instead
+    // of the blob and the fallback link pointed at the app.
+    if (openLink) openLink.setAttribute('href', url);
     if (fallback) fallback.hidden = true;
   } catch (err) {
     W.sfx.error();
@@ -573,7 +577,7 @@ function openEditor() {
   });
 }
 
-async function saveProfile() {
+async function saveProfile(label) {
   if (!state.profile) {
     await W.messageBox({
       title: 'Sheetsworks', icon: 'warning', heading: 'Nothing to save',
@@ -585,7 +589,7 @@ async function saveProfile() {
   await working('editor', 'Saving...', () => api('/profile', {
     method: 'PUT', body: state.profile,
   }));
-  W.setStatus('editor', 'Saved at ' + new Date().toLocaleTimeString(), 'right');
+  W.setStatus('editor', (label || 'Profile') + ' - saved', 'right');
 }
 
 /* ---- AI notice ---------------------------------------------------------- */
@@ -643,6 +647,7 @@ function buildTaskbar() {
   const menu = document.getElementById('startMenu');
   menu.textContent = '';
   menu.appendChild(W.startItem('My Resume', 'resume', openEditor));
+  menu.appendChild(W.startItem('Sample Resume', 'notepad', loadSample));
   menu.appendChild(W.startItem('File Manager', 'folder', openFileManager));
   menu.appendChild(W.startItem('Preview', 'find', openPreview));
   menu.appendChild(W.startSeparator());
@@ -653,6 +658,44 @@ function buildTaskbar() {
   menu.appendChild(W.startItem('About Sheetsworks', 'computer', openAbout));
   menu.appendChild(W.startSeparator());
   menu.appendChild(W.startItem('Exit', 'error', confirmExit));
+}
+
+/* --------------------------------------------------------- sample resume */
+/* Load a finished, entirely fictional resume so there is something to look at
+   before you have written anything. It refuses to overwrite a profile that
+   already has content in it, and says plainly that the data is made up --
+   a demo that looks like a real CV is a demo someone will send by accident. */
+
+async function loadSample(force) {
+  const sample = window.SampleResume.build();
+  if (!force && !window.SampleResume.isEmpty(state.profile)) {
+    const answer = await W.messageBox({
+      title: 'Sample Resume', icon: 'warning',
+      heading: 'Replace what is already here?',
+      message: 'You already have a profile saved. Loading the sample will '
+             + 'overwrite it.\n\nThere is no undo for this yet, so cancel if '
+             + 'you want to keep your own words.',
+      buttons: ['Replace', 'Cancel'],
+    });
+    if (answer !== 'Replace') return;
+  }
+
+  state.profile = sample;
+  const rec = openEditor();
+  rec.title.textContent = 'My Resume - ' + sample.contact.name;
+  W.setStatus('editor', 'Sample loaded - not saved yet', 'right');
+  await saveProfile('Sample Resume loaded');
+
+  await W.messageBox({
+    title: 'Sample Resume', icon: 'info',
+    heading: 'This is not a real person',
+    message: 'Every employer, institution, date and number in it is invented. '
+           + '"Sample Analytics" does not exist.\n\n'
+           + 'It has been saved over your profile, so use Display Properties '
+           + 'or clear it before you start writing your own.',
+    buttons: ['OK'],
+  });
+  refreshPreview('preview');
 }
 
 async function confirmExit() {
@@ -758,7 +801,7 @@ function requestedWindows() {
 window.Sheetsworks = {
   state,
   openEditor, openFileManager, openReadMe, openPreview, openDisplay,
-  openAbout, openAiNotice, confirmExit,
+  openAbout, openAiNotice, confirmExit, loadSample,
 };
 
 if (document.readyState === 'loading') {

@@ -158,6 +158,83 @@ a scrolling marquee. All of it behind `prefers-reduced-motion`.
 no path from an icon string to anything executable. The CSP, the two-policy
 split, and the six-route surface are unchanged.
 
+### Stage 5a verification pass
+
+Full sweep before the editor, at the user's request: the pytest suite, a
+100-check API sweep against a live server, and an 87-check browser harness that
+drives the real desktop. Two new artefacts, both under `out/` and both
+deliberately **not** shipped:
+
+- `out/verify_api.py` — every route, both templates, all three export formats,
+  the failure paths, the security headers, and filename-injection attempts.
+- `out/_verify.html` + `out/_verify.js`, driven by `out/run-ui-verify.ps1` —
+  opens every window, asserts on the real DOM, and exercises focus, z-order,
+  minimise, maximise, the modal veil and Escape.
+
+**The browser harness lives outside `app/static/` because it `PUT`s to
+`/profile`.** Shipping it on the app's origin would put a tool that can
+overwrite your stored resume in production. The runner copies it in and removes
+it again.
+
+### Four real bugs the verification pass found
+
+1. **`rec.dialog` was read in two places and never assigned.** The Escape
+   handler and `toggleMax` both read it; `createWindow` never set it. Undefined
+   is falsy, so nothing threw and nothing looked broken — Escape simply could
+   not dismiss a modal dialog, and a dialog would have been maximisable. Found
+   by dispatching a real key event at the real page. There is now a test that
+   asserts **every** `rec.<name>` read anywhere in the shell is assigned in the
+   record literal; it immediately caught a second instance, `rec.onResize`,
+   which was dead code and has been removed.
+2. **A modal dialog could not be dismissed at all.** `messageBox`'s `onClose`
+   returned `false`, vetoing the close, while the buttons removed the window
+   themselves. So Escape resolved the promise but left the dialog on screen with
+   the veil up — and a Win95 modal has no close box either. Both paths now go
+   through one `finish()`.
+3. **Icons leaked a character into every ancestor's text.** The `?` and `i`
+   glyphs were SVG `<text>` nodes, so the Read Me desktop icon announced itself
+   as **"?Read Me"** to a screen reader, and any lookup by label matched
+   `"?Read Me"`. Both are now drawn as strokes. An icon must contribute no
+   characters at all.
+4. **`GET /profile` was not `no-store`.** Exports and previews were; the
+   profile was not, so a resume — name, email, phone — could be left in a disk
+   cache or a shared proxy. Found by sweeping every response for the header
+   rather than assuming the ones remembered had it.
+
+Plus one small one: the preview's fallback link was set with `openLink.href =`,
+which reads back resolved against the document, so it stored the page URL
+instead of the blob and the "open in a new tab" link pointed at the app.
+
+### A testing mistake worth recording
+
+A verification run reported `GET /profile` missing `no-store` **after that had
+already been fixed**. The cause: a uvicorn left over from an earlier run still
+held the test port, so the script was talking to a build from before the fix and
+"reporting" a defect that no longer existed. `out/free-ports.ps1` now clears the
+range and refuses to run against a held port. A test that silently exercises the
+wrong build is worse than no test, because it invents problems.
+
+Two harness bugs of the same kind: the first UI harness loaded the app in an
+iframe, whose `load` event never fires under `--virtual-time-budget`, so every
+check silently did nothing and an **empty log looked exactly like a clean run**;
+it now runs the app's scripts in the top document and writes to the log
+synchronously before its async body, so a harness that dies early says so.
+
+### Known gaps, stated plainly
+
+- **The editor does not exist yet.** The My Resume window holds a placeholder,
+  so nothing can be typed into it. That is Stage 5b, and it is the only reason
+  the editing flow has not been exercised end to end.
+- **There is no Export dialog yet.** Exports work through the API and have been
+  verified in all three formats across both templates, but there is no window
+  for them.
+- **Saved versions cannot be listed or reopened.** There is `POST /versions` and
+  `POST /versions/from-profile`, and nothing else — so a snapshot is
+  write-only, reachable only if you kept its id. The File Manager was going to
+  be a version browser; as built it browses *sections* instead, and the version
+  list needs an endpoint that does not exist. This is the first thing Stage 5b
+  should add.
+
 ### Security pass (tests in `tests/test_security.py`)
 DNS rebinding closed with `TrustedHostMiddleware`; over-nested JSON (~6KB of `[`) caused a 500 + traceback, now 422; invisible/control characters (NUL, U+202E, zero-width, bidi isolates, BOM, DEL) rejected naming the code point; list fields capped 60/12/20. Security headers on every response with **two CSPs** — `default-src 'none'` for API routes, `default-src 'self'` for the page (the strict API policy would otherwise have blanked the UI). Exports sent `no-store`. Verified **not** vulnerable with tests: SQL injection (queries parameterised), CORS absent by design, no secret in any response.
 

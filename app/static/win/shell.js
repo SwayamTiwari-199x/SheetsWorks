@@ -54,12 +54,17 @@ const ICONS = {
   display: '<rect x="3" y="5" width="26" height="18" fill="#c0c0c0" stroke="#000"/>' +
           '<rect x="6" y="8" width="20" height="12" fill="#000080"/>' +
           '<path d="M12 23v4M20 23v4M8 27h16" stroke="#000"/>',
+  // The ? and the i are drawn as strokes rather than as <text>. An SVG text node
+  // becomes part of its ancestors' textContent, so the Read Me desktop icon
+  // announced itself as "?Read Me" and any lookup by label matched "?Read Me".
+  // An icon must contribute no characters at all.
   help: '<circle cx="16" cy="16" r="13" fill="#000080" stroke="#fff" stroke-width="2"/>' +
-        '<text x="16" y="23" font-size="18" font-family="Tahoma,sans-serif" ' +
-        'font-weight="bold" fill="#fff" text-anchor="middle">?</text>',
+        '<path d="M12.5 12.5a3.6 3.6 0 1 1 4.4 4.3c-.9.3-1.4 1.1-1.4 2v1" ' +
+        'fill="none" stroke="#fff" stroke-width="2.4"/>' +
+        '<rect x="14.6" y="22.4" width="2.9" height="2.9" fill="#fff"/>',
   info: '<circle cx="16" cy="16" r="13" fill="#ff0000" stroke="#fff" stroke-width="2"/>' +
-        '<text x="16" y="23" font-size="18" font-family="Tahoma,sans-serif" ' +
-        'font-weight="bold" fill="#fff" text-anchor="middle">i</text>',
+        '<rect x="14.6" y="13.4" width="2.9" height="10.6" fill="#fff"/>' +
+        '<rect x="14.6" y="7.4" width="2.9" height="2.9" fill="#fff"/>',
   warning: '<path d="M16 2 31 29H1z" fill="#ffd700" stroke="#000"/>' +
            '<rect x="15" y="11" width="3" height="11" fill="#000"/>' +
            '<rect x="15" y="24" width="3" height="3" fill="#000"/>',
@@ -320,6 +325,13 @@ function createWindow(opts) {
     id, el: win, title: text, body,
     minimised: false, maximised: false,
     restore: null, onClose: o.onClose, modal: !!o.modal,
+    // Stored, not merely used to build the class name. Both toggleMax() and the
+    // Escape handler read rec.dialog, and it was never assigned -- so Escape
+    // could never dismiss a modal dialog, and a dialog would have been
+    // maximisable. Undefined is falsy, so nothing threw and nothing looked
+    // broken: the feature was simply absent. Found by dispatching a real key
+    // event, not by reading the source.
+    dialog: !!o.dialog,
     resizable: o.resizable !== false && !o.dialog,
     iconName: o.icon || 'app',
   };
@@ -446,8 +458,6 @@ function startResize(id, win, grip) {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
       document.body.classList.remove('resizing');
-      const rec = wins.get(id);
-      if (rec && rec.onResize) rec.onResize();
     };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
@@ -660,8 +670,23 @@ function messageBox(opts) {
   const o = opts || {};
   const buttons = o.buttons || ['OK'];
   return new Promise((resolve) => {
+    let settled = false;
+    const id = o.id || ('dlg' + Math.random().toString(36).slice(2, 9));
+
+    /* One exit point, used by the buttons, by Escape and by the window manager
+       alike. Previously the buttons removed the window themselves and onClose
+       returned false, which meant Escape resolved the promise but left the
+       dialog on screen with the modal veil still up: a dialog with no close box
+       and no working Escape, which is a trap. */
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+      close(id);
+    };
+
     const rec = createWindow({
-      id: o.id,
+      id: id,
       dialog: true,
       modal: o.modal !== false,
       title: o.title || 'Sheetsworks',
@@ -671,7 +696,11 @@ function messageBox(opts) {
       resizable: false,
       minimisable: false,
       status: false,
-      onClose: () => { resolve(o.cancelValue !== undefined ? o.cancelValue : null); return false; },
+      onClose: () => {
+        // Escape, or a stray click while modal: treated as Cancel.
+        finish(o.cancelValue !== undefined ? o.cancelValue : null);
+        return true;                   // and let the window actually go away
+      },
     });
 
     const row = document.createElement('div');
@@ -698,16 +727,7 @@ function messageBox(opts) {
       b.type = 'button';
       b.className = 'btn' + (i === 0 ? ' default' : '');
       b.textContent = label;
-      b.addEventListener('click', () => {
-        sfx.click();
-        rec.el.remove();
-        wins.delete(rec.id);
-        const next = topmostVisible();
-        if (next) focusWindow(next); else activeId = null;
-        buildTaskButtons();
-        syncVeil();
-        resolve(label);
-      });
+      b.addEventListener('click', () => { sfx.click(); finish(label); });
       bar.appendChild(b);
     });
     rec.body.appendChild(bar);

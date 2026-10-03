@@ -124,7 +124,7 @@ def test_the_preview_window_keeps_its_escape_hatch() -> None:
     rendered as a blank white rectangle. A blocked frame must never be silent."""
     assert 'previewFallback' in APP
     assert 'previewOpen' in APP
-    assert "openLink.href = url" in APP
+    assert "openLink.setAttribute('href', url)" in APP
     assert "fallback.hidden = false" in APP
     assert "fallback.hidden = true" in APP
 
@@ -258,9 +258,57 @@ def test_an_unknown_window_name_is_ignored_rather_than_fatal() -> None:
 def test_the_app_surface_is_exported() -> None:
     """The same reason Win95 exposed its windows to the shell."""
     assert "window.Sheetsworks = {" in APP
-    surface = APP.split("window.Sheetsworks = {", 1)[1][:400]
-    for opener in ("openEditor", "openFileManager", "openReadMe", "openPreview"):
+    surface = APP.split("window.Sheetsworks = {", 1)[1][:500]
+    for opener in ("openEditor", "openFileManager", "openReadMe", "openPreview",
+                   "loadSample"):
         assert opener in surface, f"{opener} is not on the app surface"
+
+
+# --- the sample resume -----------------------------------------------------
+
+
+def test_a_sample_resume_exists_and_is_loadable() -> None:
+    """You cannot test a resume builder with nothing to look at."""
+    assert "window.SampleResume" in APP
+    src = (STATIC / "win" / "sample.js").read_text(encoding="utf-8")
+    assert "Sample Analytics" in src
+    assert "Sample Institute of Technology" in src
+    assert "Dusht Verma" in src
+
+
+def test_the_sample_is_obviously_fake() -> None:
+    """A demo that reads like a real CV is a demo somebody sends by accident."""
+    src = (STATIC / "win" / "sample.js").read_text(encoding="utf-8")
+    body = APP.split("async function loadSample(", 1)[1][:900]
+    assert "not a real person" in body or "does not exist" in body
+    assert "Sample Analytics" in src
+
+
+def test_loading_the_sample_refuses_to_clobber_real_work() -> None:
+    src = (STATIC / "win" / "sample.js").read_text(encoding="utf-8")
+    body = APP.split("async function loadSample(", 1)[1][:900]
+    assert "isEmpty(state.profile)" in body
+    assert "overwrite" in body
+    assert "Replace" in body
+    assert "isEmpty: function" in src
+
+
+def test_the_sample_is_reachable_from_the_desktop_and_the_start_menu() -> None:
+    assert "'Sample Resume'" in APP
+    assert APP.count("'Sample Resume'") >= 2, "icon and Start menu item"
+
+
+def test_the_sample_satisfies_every_field_the_model_requires() -> None:
+    """A sample the API rejects is worse than no sample."""
+    import re as _re
+    src = (STATIC / "win" / "sample.js").read_text(encoding="utf-8")
+    for field in ("contact", "summary", "interests", "education", "experience",
+                  "projects", "skills", "certifications", "achievements",
+                  "extracurriculars", "publications"):
+        assert f"{field}:" in src, f"the sample is missing {field}"
+    for sub in ("name:", "email:", "phone:"):
+        assert sub in src, f"contact is missing {sub}"
+    assert _re.search(r"grade:\s*\{\s*value:", src), "grade must be {value, scale}"
 
 
 def test_every_id_the_shell_looks_up_exists_in_the_markup() -> None:
@@ -324,6 +372,93 @@ def test_the_route_surface_did_not_grow() -> None:
         "/health", "/profile", "/versions", "/versions/from-profile",
         "/export/{version_id}", "/preview",
     }
+
+
+def test_every_window_record_property_that_is_read_is_also_written() -> None:
+    """Regression, and a whole class of them.
+
+    `createWindow` builds a record and every other function reads properties off
+    it. `rec.dialog` was read by the Escape handler and by toggleMax() but never
+    assigned. Undefined is falsy, so nothing threw and nothing looked broken --
+    Escape simply could not dismiss a modal dialog, and a dialog would have been
+    maximisable. Only found by dispatching a real key event at the real page.
+
+    So: any `rec.<name>` read anywhere in the shell must appear in the record
+    literal. That catches the next one before it ships.
+    """
+    start = SHELL.index("const rec = {")
+    end = SHELL.index("};", start)
+    literal = SHELL[start:end]
+    written = set(re.findall(r"(\w+)\s*[,:]", literal))
+
+    body = SHELL.replace(literal, "")
+    read = set(re.findall(r"\brec\.(\w+)", body))
+
+    # el/title/body are destructured in the literal itself, and iconName is
+    # assigned just after it; both are legitimate.
+    missing = sorted(read - written - {"iconName"})
+    assert not missing, (
+        f"read off a window record but never assigned to it: {missing}"
+    )
+
+
+def test_escape_can_dismiss_a_modal_dialog() -> None:
+    """The user must always have a way out of a modal."""
+    handler = SHELL.split("document.addEventListener('keydown'", 1)[1][:900]
+    assert "rec.dialog" in handler, "Escape must target the dialog"
+    assert "close(rec.id)" in handler
+
+
+def test_a_message_box_does_not_veto_its_own_close() -> None:
+    """onClose used to return false, which made Escape resolve the promise but
+    leave the dialog and the modal veil on screen -- a trap, because a Win95
+    modal has no close box either."""
+    body = SHELL.split("function messageBox(", 1)[1][:2400]
+    on_close = body.split("onClose:", 1)[1].split("}),", 1)[0]
+    assert "return true" in on_close, "the close must be allowed to proceed"
+    assert "return false" not in on_close
+    # One exit point, shared by the buttons and by Escape.
+    assert "const finish = (value)" in body
+    assert "finish(label)" in body, "the buttons must go through it"
+
+
+def test_icons_contribute_no_characters_to_the_dom() -> None:
+    """Regression. The ? and i icons were drawn with <text>, and an SVG text
+    node becomes part of its ancestors' textContent -- so the Read Me desktop
+    icon announced itself as "?Read Me" to a screen reader, and any lookup by
+    label matched "?Read Me"."""
+    icons = SHELL.split("const ICONS = {", 1)[1].split("\n};", 1)[0]
+    # Strip comments first: the note explaining WHY there are no text nodes
+    # necessarily mentions <text>, and a comment is not a DOM node.
+    icons = re.sub(r"/\*.*?\*/", "", icons, flags=re.DOTALL)
+    icons = re.sub(r"(?<!:)//[^\n]*", "", icons)
+    assert "<text" not in icons, "an icon must contain no text nodes"
+    for name in ("help", "info"):
+        entry = icons.split(name + ":", 1)[1].split("\n  ", 1)[0]
+        assert ">" not in entry.replace("/>", ""), \
+            f"the {name} icon contains a text node"
+
+
+def test_the_preview_link_is_set_as_an_attribute() -> None:
+    """Assigning a.href reads it back resolved against the document, so the
+    handler stored the page URL instead of the blob and the fallback link pointed
+    back at the app."""
+    body = APP.split("async function refreshPreview(", 1)[1][:2600]
+    assert "openLink.setAttribute('href', url)" in body
+    assert "openLink.href = url" not in body
+
+
+def test_the_profile_is_never_cached() -> None:
+    """A resume is a name, an email and a phone number. Exports and previews
+    were already no-store; GET /profile was not, so it could be left in a disk
+    cache or a shared proxy. Swept for rather than assumed."""
+    profile = {"contact": {"name": "Dusht Verma", "email": "dusht@example.com",
+                           "phone": "+91 98765 43210"}}
+    with TestClient(app) as c:
+        c.put("/profile", json=profile)
+        r = c.get("/profile")
+        assert r.status_code == 200
+        assert r.headers["cache-control"] == "no-store"
 
 
 def test_nothing_loads_from_the_network() -> None:

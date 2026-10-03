@@ -402,7 +402,7 @@ def test_preview_pane_has_a_visible_fallback() -> None:
     app_js = read(APP_JS)
     assert "previewFallback" in app_js
     assert "previewOpen" in app_js
-    assert "openLink.href = url" in app_js
+    assert "openLink.setAttribute('href', url)" in app_js
     assert "fallback.hidden = false" in app_js, (
         "a failed preview must say so rather than showing an empty frame"
     )
