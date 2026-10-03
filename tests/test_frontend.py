@@ -89,14 +89,22 @@ def test_no_external_font_or_script_dependency() -> None:
 def test_no_mouse_handlers_beyond_the_agreed_chrome(js_code: str) -> None:
     """No onclick attributes and no hover/down handlers, anywhere.
 
-    Exactly three click listeners are allowed, and they are the deliberate
-    boundary agreed for this UI:
-      1. navbar section buttons -> type `cd <section>` into the terminal
-      2. #previewClose         -> close the preview pane
-      3. #previewRefresh       -> re-render the preview
-    The last two are window chrome mirroring the title bar in the reference
-    image, and they are real <button>s so Enter and Space work too. Anything
-    that edits the resume must go through a command.
+    Every click listener is a deliberate one, and each falls into exactly one
+    of three groups:
+      1. it types a command into the terminal (navbar section buttons, the rail
+         section jump lists, the New Resume action buttons, the notes buttons),
+         which keeps the terminal the single interface for editing;
+      2. it controls the preview pane (close, refresh);
+      3. it changes what the page is showing and nothing else (the masthead
+         view buttons, the NEWS stepper).
+    Group 3 is the one that was previously impossible: the page was a
+    terminal, so there was no such thing as "just show another panel".
+    Anything that edits the resume must still be group 1 or 2.
+
+    The assertion is on the set of event types, not a hard-coded count of
+    listeners. A count froze a UI that had three controls; this one has a
+    layout, and pinning its control count would mean rewriting the test every
+    time the page grows a button, which is exactly when you stop reading it.
     """
     for banned in ("onclick", "onmouseover", "onmousedown", "onmouseenter"):
         assert banned not in js_code, f"{banned} must not appear in app.js"
@@ -110,17 +118,44 @@ def test_no_mouse_handlers_beyond_the_agreed_chrome(js_code: str) -> None:
     for wanted in ("submit", "keydown", "error", "unhandledrejection"):
         assert wanted in all_listeners, f"missing {wanted} listener"
 
-    assert mouse == ["click", "click", "click", "mouseup"], f"mouse listeners: {mouse}"
+    assert set(mouse) == {"click", "mouseup"}, f"unexpected mouse events: {set(mouse)}"
+    assert mouse[-1] == "mouseup", "the only non-click handler is the focus restore"
 
     assert "btn.addEventListener('click'" in js_code
     assert "previewClose').addEventListener('click'" in js_code
     assert "previewRefresh').addEventListener('click'" in js_code
 
 
+def test_every_click_handler_is_one_of_the_three_permitted_shapes(
+    js_code: str,
+) -> None:
+    """Classify each click registration and demand it land in a known group.
+
+    This is the real guarantee the old exact-list test was reaching for: not
+    "how many handlers" but "what do they do". A new control that edits the
+    profile without typing a command fails here.
+    """
+    permitted = ("runTyped", "togglePreview", "doPreview", "showView", "stepNews")
+    lines = js_code.splitlines()
+    seen = 0
+    for i, line in enumerate(lines):
+        if "addEventListener('click'" not in line:
+            continue
+        seen += 1
+        body = "\n".join(lines[i:i + 4])
+        assert any(fn in body for fn in permitted), (
+            f"click handler does something unrecognised: {line.strip()}"
+        )
+        assert "COMMANDS." not in body, (
+            f"click handler reaches into COMMANDS directly: {line.strip()}"
+        )
+    assert seen >= 6, f"expected the page chrome's controls, found {seen}"
+
+
 def test_no_command_is_bound_directly_to_the_mouse(js_code: str) -> None:
     """A click may not call a COMMANDS.* handler directly.
 
-    That is the rule that keeps the terminal the single interface: the navbar
+    That is the rule that keeps the terminal the single interface: a control
     must route through runTyped(), never straight into an action. The handler
     body sits on the lines after the registration, so inspect those too.
     """
@@ -129,9 +164,6 @@ def test_no_command_is_bound_directly_to_the_mouse(js_code: str) -> None:
         if "addEventListener('click'" not in line:
             continue
         body = "\n".join(lines[i:i + 4])
-        assert "runTyped" in body or "togglePreview" in body or "doPreview" in body, (
-            f"click handler acts directly instead of typing a command: {line.strip()}"
-        )
         assert "COMMANDS." not in body, (
             f"click handler reaches into COMMANDS directly: {line.strip()}"
         )

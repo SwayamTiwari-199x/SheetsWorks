@@ -18,7 +18,9 @@
 
 // ---------------------------------------------------------------- constants
 
-const THEMES = ['amber', 'green', 'matrix', 'paper'];
+// Must match the palettes defined in term.css. Kept in step by
+// tests/check_static.py, which fails if the two lists drift apart.
+const THEMES = ['vintage', 'amber', 'green', 'matrix', 'paper'];
 const FORMATS = ['pdf', 'docx', 'txt'];
 
 // Menu order for the navbar. This is navigation order only; the order sections
@@ -216,10 +218,15 @@ const state = {
   history: [],
   histIndex: -1,
   undo: [],
-  previewOn: false,
+  // The preview is the point of the page, so it is on by default. `preview`
+  // still toggles it for anyone who wants the room back.
+  previewOn: true,
   previewSeq: 0,
   dirty: false,
   lastSnapshot: null,
+  view: 'home',       // home | draft | new | ai
+  tips: [],           // injected from rules.json, see loadTips()
+  newsIndex: 0,
 };
 
 const el = {
@@ -235,11 +242,45 @@ const el = {
   meta: document.getElementById('previewMeta'),
   previewOpen: document.getElementById('previewOpen'),
   previewFallback: document.getElementById('previewFallback'),
+
+  // Page chrome. Everything here is optional: the terminal must keep working
+  // with none of it present, so every use is guarded rather than assumed.
+  viewNav: document.getElementById('viewNav'),
+  views: {
+    home: document.getElementById('view-home'),
+    draft: document.getElementById('view-draft'),
+    new: document.getElementById('view-new'),
+    ai: document.getElementById('view-ai'),
+  },
+  navBtns: {
+    home: document.getElementById('navHome'),
+    draft: document.getElementById('navDraft'),
+    new: document.getElementById('navNew'),
+    ai: document.getElementById('navAi'),
+  },
+  sectionNav: document.getElementById('sectionNav'),
+  jumpNav: document.getElementById('jumpNav'),
+  newsBody: document.getElementById('newsBody'),
+  newsDot: document.getElementById('newsDot'),
+  newsPrev: document.getElementById('newsPrev'),
+  newsNext: document.getElementById('newsNext'),
+  progressFill: document.getElementById('progressFill'),
+  progressText: document.getElementById('progressText'),
+  notesList: document.getElementById('notesList'),
+  notesAdd: document.getElementById('notesAdd'),
+  notesClear: document.getElementById('notesClear'),
+  recentName: document.getElementById('recentName'),
+  recentMeta: document.getElementById('recentMeta'),
+  tipsData: document.getElementById('tipsData'),
 };
 
 // ---------------------------------------------------------------- output
 
 function out(text, cls) {
+  // Terminal output always belongs in the Draft view. If a command was fired
+  // from the Home page or a rail button, bring the terminal forward rather than
+  // printing into a hidden box where the user would never see it.
+  if (state.view !== 'draft') showView('draft');
   const div = document.createElement('div');
   div.className = 'line ' + (cls || 'out');
   div.textContent = text;           // the only way text enters the DOM
@@ -556,9 +597,206 @@ function refreshNavbar() {
   add('hint', 'hint', null, false);
   add('help', 'help', null, false);
   add('preview', 'preview', null, state.previewOn);
+
+  // The page chrome is a view of the same state as the navbar, so it is
+  // refreshed from the same place. Two independent update paths would drift.
+  refreshChrome();
 }
 
 const notesCount = () => (store.get('rb.notes', []) || []).length;
+
+// ---------------------------------------------------------------- page chrome
+// Everything that draws the front page: view switching, the NEWS ticker, the
+// progress meter, the section jump lists and the notes panel.
+//
+// Two rules hold throughout. First, all text goes in via textContent -- the
+// tips in particular come from rules.json and must never be parsed as markup.
+// Second, the whole module is defensive: if a piece of chrome is missing the
+// terminal still works, because editing never depends on any of this.
+
+function hasChrome() {
+  return !!(el.views && el.views.draft);
+}
+
+function showView(name) {
+  const target = (name === 'new') ? 'new' : name;
+  if (!hasChrome() || !el.views[target]) return;
+  state.view = target;
+  for (const key of Object.keys(el.views)) {
+    if (el.views[key]) el.views[key].hidden = (key !== target);
+  }
+  for (const key of Object.keys(el.navBtns)) {
+    if (el.navBtns[key]) el.navBtns[key].setAttribute('aria-current', String(key === target));
+  }
+  // Only the terminal takes focus; the other views have nothing to type into.
+  if (target === 'draft' && el.input && el.input.focus) el.input.focus();
+}
+
+// The NEWS panel reads rules.json, injected by the server into an inert
+// <template>. A template's contents are never parsed as HTML and never run, so
+// this cannot become markup. A parse failure must not break the page, so the
+// panel simply says it has nothing rather than throwing during boot.
+function loadTips() {
+  if (!el.tipsData) return [];
+  let text = '';
+  try {
+    // In a real document the payload is the template's text content.
+    if (el.tipsData.content && el.tipsData.content.textContent) {
+      text = el.tipsData.content.textContent;
+    } else if (typeof el.tipsData.textContent === 'string') {
+      text = el.tipsData.textContent;
+    }
+    const parsed = JSON.parse(text || '{"tips":[]}');
+    return Array.isArray(parsed.tips) ? parsed.tips : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function renderNews() {
+  if (!el.newsBody) return;
+  const tips = state.tips;
+  el.newsBody.textContent = '';
+  if (!tips.length) {
+    const p = document.createElement('p');
+    p.className = 'tip-title';
+    p.textContent = 'No research notes loaded.';
+    el.newsBody.appendChild(p);
+    if (el.newsDot) el.newsDot.textContent = '';
+    return;
+  }
+  const i = ((state.newsIndex % tips.length) + tips.length) % tips.length;
+  const tip = tips[i];
+
+  const title = document.createElement('span');
+  title.className = 'tip-title';
+  title.textContent = tip.title || '';
+
+  // The tag is shown, not hidden: half this advice is one source, and the
+  // panel should not imply it is all equally well established.
+  const tag = document.createElement('span');
+  tag.className = 'tag';
+  tag.setAttribute('data-tag', tip.tag || 'unverified');
+  tag.textContent = tip.tag || 'unverified';
+  title.appendChild(tag);
+
+  const body = document.createElement('span');
+  body.className = 'tip-body';
+  body.textContent = tip.body || '';
+
+  const src = document.createElement('span');
+  src.className = 'tip-src';
+  src.textContent = tip.source || '';
+
+  el.newsBody.appendChild(title);
+  el.newsBody.appendChild(body);
+  el.newsBody.appendChild(src);
+
+  if (el.newsDot) el.newsDot.textContent = (i + 1) + ' / ' + tips.length;
+}
+
+function stepNews(delta) {
+  if (!state.tips.length) return;
+  state.newsIndex = (state.newsIndex + delta + state.tips.length) % state.tips.length;
+  renderNews();
+}
+
+// How much of the resume is actually filled, counted over the sections the
+// active template will print. A section the template hides is not missing
+// work, so counting it would punish the user for choosing `sheets`.
+function progressOf() {
+  const sections = sectionsOf(state.profile || {})
+    .filter((s) => sectionPrinted(s) && s !== 'contact');
+  const filled = sections.filter((s) => hasContent(s));
+  return { done: filled.length, total: sections.length, filled: filled };
+}
+
+function renderProgress() {
+  if (!el.progressFill && !el.progressText) return;
+  const { done, total } = progressOf();
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  if (el.progressFill) el.progressFill.style.width = pct + '%';
+  if (el.progressText) {
+    el.progressText.textContent = total
+      ? done + ' of ' + total + ' sections filled (' + pct + '%)'
+      : 'Start with contact details in the Draft view.';
+  }
+}
+
+// Two jump lists from one builder: the rail, which shows counts, and the strip
+// under the preview, which is the "click a section to edit it" affordance.
+// Clicking runs `cd <section>`, so it types a command rather than editing
+// anything itself.
+function buildSectionNav(container, opts) {
+  if (!container) return;
+  container.textContent = '';
+  const sections = sectionsOf(state.profile || {});
+  if (!sections.length) return;
+  for (const section of sections) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.setAttribute('data-cmd', 'cd ' + section);
+    btn.setAttribute('data-empty', String(!hasContent(section)));
+    btn.setAttribute('aria-current', String(state.section === section));
+
+    const label = document.createElement('span');
+    label.textContent = section;
+    btn.appendChild(label);
+
+    if (opts && opts.counts) {
+      const n = document.createElement('span');
+      n.className = 'n';
+      n.textContent = String(visibleCount(section));
+      btn.appendChild(n);
+    }
+    btn.addEventListener('click', () => runTyped('cd ' + section));
+    container.appendChild(btn);
+  }
+}
+
+function renderRecent() {
+  if (!el.recentName) return;
+  const contact = (state.profile && state.profile.contact) || {};
+  const name = (contact.name || '').trim();
+  el.recentName.textContent = name || 'no resume yet';
+  const bits = [];
+  if (contact.email) bits.push(contact.email);
+  bits.push(activeTemplate);
+  const { done, total } = progressOf();
+  bits.push(done + '/' + total + ' sections');
+  if (el.recentMeta) el.recentMeta.textContent = bits.join(' · ');
+}
+
+function renderNotes() {
+  if (!el.notesList) return;
+  el.notesList.textContent = '';
+  const notes = store.get('rb.notes', []) || [];
+  if (!notes.length) {
+    const p = document.createElement('p');
+    p.className = 'empty';
+    p.textContent = 'Nothing written down yet.';
+    el.notesList.appendChild(p);
+    return;
+  }
+  // Only the most recent few: this is a rail, not an archive.
+  for (const note of notes.slice(-6)) {
+    const p = document.createElement('p');
+    p.textContent = String(note);
+    el.notesList.appendChild(p);
+  }
+}
+
+// One entry point, called whenever the profile, template or section changes, so
+// the chrome can never disagree with the terminal.
+function refreshChrome() {
+  if (!hasChrome()) return;
+  renderProgress();
+  renderRecent();
+  renderNews();
+  renderNotes();
+  buildSectionNav(el.sectionNav, { counts: true });
+  buildSectionNav(el.jumpNav, { counts: false });
+}
 
 // Which sections the active template will actually print. Mirrors the
 // include_summary / include_interests flags in rules.json resume_templates.
@@ -1442,7 +1680,7 @@ const HELP_TEXT = [
   '    reset --force       empty the profile',
   '',
   '  LOOK AND FORMAT',
-  '    theme [name]        amber, green, matrix, paper',
+  '    theme [name]        vintage, amber, green, matrix, paper',
   '    template [name]     blank (everything) or sheets (no summary, Interests last)',
   '    clear               clear the screen',
   '',
@@ -1781,6 +2019,34 @@ document.getElementById('previewRefresh').addEventListener('click', () => {
   el.input.focus();
 });
 
+// --- page chrome wiring
+// View buttons only switch views. Every button that means "do something to my
+// resume" goes through runTyped, so it types a command and the terminal stays
+// the single interface: no button edits the profile behind its back.
+
+for (const key of Object.keys(el.navBtns)) {
+  const btn = el.navBtns[key];
+  if (btn && btn.addEventListener) {
+    btn.addEventListener('click', () => showView(key));
+  }
+}
+
+if (el.newsPrev) el.newsPrev.addEventListener('click', () => stepNews(-1));
+if (el.newsNext) el.newsNext.addEventListener('click', () => stepNews(1));
+if (el.notesAdd) el.notesAdd.addEventListener('click', () => runTyped('notes'));
+if (el.notesClear) el.notesClear.addEventListener('click', () => runTyped('notes clear'));
+
+// Buttons on the New Resume page. Each carries the command it runs in
+// data-cmd, so the wiring and the markup cannot disagree.
+const actionButtons = [
+  ['newBlank', 'reset'], ['useBlank', 'template blank'],
+  ['useSheets', 'template sheets'], ['newDemo', 'demo'],
+];
+for (const [id, command] of actionButtons) {
+  const btn = document.getElementById(id);
+  if (btn && btn.addEventListener) btn.addEventListener('click', () => runTyped(command));
+}
+
 // Nothing on the page uses the mouse, but if a stray click ever lands, put
 // focus back so the keyboard never appears dead.
 document.addEventListener('mouseup', () => el.input.focus());
@@ -1795,25 +2061,46 @@ window.addEventListener('unhandledrejection', (ev) => {
 
 // ---------------------------------------------------------------- boot
 
+// Which view to open on. A ?view= in the URL wins, so a view can be linked to;
+// otherwise a first-time visitor lands in the terminal, because that is where
+// the welcome text is, and everyone else lands on the front page. The terminal
+// is always one click away, and any command typed from elsewhere pulls it
+// forward automatically.
+function openingView(emptyProfile) {
+  // typeof, not a bare read: this file is also executed under node with no DOM
+  // globals, and a bare `location` there would throw during boot.
+  if (typeof location !== 'undefined' && location && location.search) {
+    try {
+      const asked = new URLSearchParams(location.search).get('view');
+      if (asked && el.views[asked]) return asked;
+    } catch (_) { /* an unparseable query string is not worth failing boot over */ }
+  }
+  return emptyProfile ? 'draft' : 'home';
+}
+
 async function boot() {
   const saved = store.get('rb.theme', null);
   if (THEMES.includes(saved)) document.documentElement.setAttribute('data-theme', saved);
   const savedTemplate = store.get('rb.template', null);
   if (TEMPLATE_BLURB[savedTemplate]) activeTemplate = savedTemplate;
   state.history = store.get('rb.history', []);
+  // Loaded before the first render of the NEWS panel, so it is populated on the
+  // first paint rather than flashing empty and filling in.
+  state.tips = loadTips();
 
   const ascii = document.createElement('div');
   ascii.className = 'ascii';
   ascii.textContent = BANNER;
   el.scrollback.appendChild(ascii);
 
+  let empty = true;
   try {
     const resp = await api('/profile');
     state.profile = await resp.json();
     setStatus('ready', '');
     refreshNavbar();
     ok('loaded your profile — ' + (state.profile.contact && state.profile.contact.name || '(no name yet)'));
-    const empty = profileIsEmpty();
+    empty = profileIsEmpty();
     if (empty) welcome();
   } catch (err) {
     if (err.status === 404) {
@@ -1821,12 +2108,24 @@ async function boot() {
       setStatus('new profile', '');
       ok('no profile saved yet — let us build one');
       welcome();
+      empty = true;
     } else {
       setStatus('offline', 'error');
       errorOut(err.message);
       outLines(['', 'The terminal still works; only save/export need the server.', ''], 'dim');
     }
     refreshNavbar();
+  }
+
+  // A first-time visitor lands in the terminal, because that is where the
+  // welcome text is. Everyone else lands on the front page.
+  showView(openingView(empty));
+
+  // The preview is on by default, so render it once rather than waiting for an
+  // edit to trigger the first paint.
+  if (state.previewOn) {
+    el.pane.hidden = false;
+    doPreview();
   }
 
   el.input.focus();

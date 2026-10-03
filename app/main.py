@@ -12,6 +12,7 @@ worse than no endpoint at all.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from contextlib import asynccontextmanager
@@ -119,9 +120,29 @@ async def security_and_recursion(request, call_next):
 
 
 @app.get("/", include_in_schema=False)
-def terminal_page() -> FileResponse:
-    """The single-page terminal UI (Stage 3)."""
-    return FileResponse(STATIC_DIR / "index.html")
+def terminal_page() -> Response:
+    """The single-page UI.
+
+    The NEWS panel is filled from rules.json rather than from markup typed into
+    index.html, so the advice on screen is the cited research in RULES.md rather
+    than a paraphrase. It is injected into a <template>, whose contents are
+    never parsed as HTML and never executed, and "<" is escaped so the JSON
+    cannot terminate the element early. No new route: the route surface stays
+    exactly what the stage built.
+    """
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    payload = json.dumps({"tips": rules.tips()}, separators=(",", ":"))
+    # json.dumps does not escape "<"; do it by hand so no value can close the
+    # template or open a tag.
+    safe = payload.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+    html = html.replace(
+        '{"tips": []}', safe, 1
+    )
+    return Response(
+        content=html,
+        media_type="text/html; charset=utf-8",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

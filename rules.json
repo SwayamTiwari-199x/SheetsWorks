@@ -75,6 +75,57 @@
     },
     "why_not_merge": "The two templates are kept separate on purpose. Silently dropping Summary would override a verified, cited rule with one source's opinion; the honest resolution is to let the user pick, and to record the disagreement where the renderer can see it."
   },
+  "tips": [
+    {
+      "title": "The human screener is the real gate",
+      "body": "An ATS is built to never block a qualified candidate, so it errs toward letting people through. The person reading is under pressure not to waste a call on an unsuitable CV, so they cut hard: no relevant title, a typo, four pages, or anything they cannot skim in seconds. Write for that reader.",
+      "source": "RULES.md 2 and 3a",
+      "tag": "verified"
+    },
+    {
+      "title": "Aim for one page",
+      "body": "Unless you have 20+ years of experience, one page is the expected length. Space spent on a summary is space not spent on evidence.",
+      "source": "RULES.md 3a; RULES.md 5",
+      "tag": "verified"
+    },
+    {
+      "title": "Numbers carry the claim",
+      "body": "Reduced p99 latency from 900ms to 240ms beats improved performance. Anything you improved, state the before and the after, and where a number is genuinely unknown say so rather than inventing one.",
+      "source": "RULES.md 4",
+      "tag": "verified"
+    },
+    {
+      "title": "One bullet, one line, 15 to 30 words",
+      "body": "A bullet that wraps to three lines is a paragraph nobody reads. Aim for 15 to 30 words and keep it scannable top to bottom.",
+      "source": "RULES.md 4",
+      "tag": "verified"
+    },
+    {
+      "title": "Finish with a line about you",
+      "body": "A single Interests line at the end makes you a person rather than a faceless CV, lets the reader picture you as a coworker, and hands the interviewer an easy opener. One line is the whole point.",
+      "source": "RULES.md 3a",
+      "tag": "unverified"
+    },
+    {
+      "title": "Tailor lightly, not wildly",
+      "body": "Change your title, your first bullet, and the order of your skills. Change everything and you will drive yourself mad, and the resume stops sounding like you.",
+      "source": "RULES.md 3a",
+      "tag": "unverified"
+    },
+    {
+      "title": "Titles may be adjusted",
+      "body": "Software Engineer can honestly become Front-End Software Engineer if that is what you do. It signals relevance without misrepresenting anything. Never invent a role you did not hold.",
+      "source": "RULES.md 3a",
+      "tag": "unverified"
+    },
+    {
+      "title": "Black on white, one column",
+      "body": "No colour, no sidebars, no quadrants. Layout the eye expects is the layout the eye scans fastest, and that is the only one worth optimising for.",
+      "source": "RULES.md 2 and 3a",
+      "tag": "verified"
+    }
+  ],
+  "tips_note": "The NEWS panel on the front page renders this list. It is served from rules.json and injected into the page by the server rather than written into the markup, so advice on screen is the researched advice in RULES.md and not a paraphrase typed from memory.",
   "safe_headings": {
     "acceptable": ["Summary", "Work Experience", "Experience", "Professional Experience", "Education", "Skills", "Technical Skills", "Core Competencies", "Projects", "Certifications", "Achievements", "Awards", "Publications", "Interests"],
     "avoid": ["My Journey", "What I Bring", "About Me", "Career Objective", "Extra-Curricular Activities (unclear variants)"],

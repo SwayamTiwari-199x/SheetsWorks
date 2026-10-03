@@ -84,6 +84,16 @@ def fallback_append() -> list[str]:
     return list(load_rules()["section_order"].get("fallback_append", []))
 
 
+def tips() -> list[dict]:
+    """The research-backed advice shown in the front page NEWS panel.
+
+    Served from rules.json rather than hardcoded in the markup so that what a
+    user reads on screen is the cited research in RULES.md, not a paraphrase
+    invented by the UI.
+    """
+    return list(load_rules().get("tips", []))
+
+
 # --- resume templates -----------------------------------------------------
 # A template decides which sections appear and in what order. Both are defined in
 # rules.json so the renderer never hardcodes a convention (CLAUDE.md rule 4), and
