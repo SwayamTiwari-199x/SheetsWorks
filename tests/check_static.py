@@ -17,11 +17,17 @@ STATIC = ROOT / "app" / "static"
 
 SHELL = (STATIC / "win" / "shell.js").read_text(encoding="utf-8")
 APP = (STATIC / "win" / "app.js").read_text(encoding="utf-8")
+EDITOR = (STATIC / "win" / "editor.js").read_text(encoding="utf-8")
+MODEL = (STATIC / "win" / "editor-model.js").read_text(encoding="utf-8")
+SAMPLE = (STATIC / "win" / "sample.js").read_text(encoding="utf-8")
 CSS = (STATIC / "win" / "win95.css").read_text(encoding="utf-8")
 HTML = (STATIC / "index.html").read_text(encoding="utf-8")
 OLD_JS = (STATIC / "win" / "old-app.js").read_text(encoding="utf-8")
 OLD_CSS = (STATIC / "win" / "old-term.css").read_text(encoding="utf-8")
 OLD_HTML = (STATIC / "win" / "terminal.html").read_text(encoding="utf-8")
+
+# Everything that ships as the new front end.
+NEW_JS = (SHELL, APP, EDITOR, MODEL, SAMPLE)
 
 failures = []
 
@@ -33,10 +39,29 @@ def check(ok, message):
 
 # --- every id the code asks for must exist -------------------------------
 
-wanted = set(re.findall(r"getElementById\(\s*'([A-Za-z0-9_-]+)'", SHELL + APP))
+wanted = set(re.findall(r"getElementById\(\s*'([A-Za-z0-9_-]+)'",
+                        "\n".join(NEW_JS)))
 present = set(re.findall(r'id="([A-Za-z0-9_-]+)"', HTML))
 missing = sorted(wanted - present)
 check(not missing, f"code asks for ids the markup lacks: {missing}")
+
+# Scripts must load in dependency order: the model and the form before the app
+# that opens them, or boot throws a ReferenceError.
+order = ["shell.js", "sample.js", "editor-model.js", "editor.js", "app.js"]
+positions = []
+for name in order:
+    tag = f'src="/static/win/{name}"'
+    check(tag in HTML, f"index.html does not load {name}")
+    if tag in HTML:
+        positions.append((name, HTML.index(tag)))
+check([n for n, _ in positions] == order,
+      f"scripts load out of dependency order: {[n for n, _ in positions]}")
+
+# Every script the page loads must exist on disk.
+for ref in re.findall(r'src="(/static/[^"]+)"', HTML):
+    check((STATIC / ref[len("/static/"):]).exists(), f"{ref} does not exist")
+for ref in re.findall(r'href="(/static/[^"]+)"', HTML):
+    check((STATIC / ref[len("/static/"):]).exists(), f"{ref} does not exist")
 
 # --- the archived terminal must still resolve its own assets -------------
 

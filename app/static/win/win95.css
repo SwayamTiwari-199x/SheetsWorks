@@ -639,6 +639,74 @@ textarea.field { height: auto; resize: none; padding: 4px; line-height: 1.35; }
 body.dragging, body.dragging * { user-select: none; cursor: default !important; }
 body.resizing, body.resizing * { user-select: none; }
 
+/* ============================================================== editor === */
+
+/* The form inside My Resume: a section list on the left, fields on the right, a
+   button bar along the bottom. Whole pixels throughout, because a 1px bevel on
+   a fractional boundary goes blurry. */
+
+.ed-split { flex: 1 1 auto; min-height: 0; gap: 6px; }
+
+.ed-sections { flex: 0 0 190px; width: 190px; overflow-y: auto; }
+
+/* A section the active template will not print. Marked, not hidden -- hiding it
+   would read as data loss. */
+.ed-sections .listbox-row[data-hidden="true"]::after {
+  content: "  (not printed)";
+  color: var(--disabled);
+  font-size: 9px;
+}
+
+.ed-fields {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+}
+
+.ed-blurb { margin: 0 0 10px; color: var(--dim); font-size: 11px; line-height: 1.45; }
+
+.ed-field {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.ed-label { font-size: 11px; color: var(--ink); }
+.ed-input { width: 100%; }
+/* A textarea needs the full width and its label above it, not beside it. */
+.ed-field:has(textarea) { grid-template-columns: 1fr; }
+.ed-field:has(textarea) .ed-label { margin-bottom: 3px; }
+textarea.ed-input { height: 64px; }
+
+.ed-entries { display: flex; gap: 6px; margin-bottom: 10px; min-height: 78px; }
+.ed-picker { flex: 1 1 auto; min-width: 0; overflow-y: auto; max-height: 78px; }
+.ed-tools { flex: 0 0 66px; display: flex; flex-direction: column; gap: 3px; }
+.ed-tools .btn { min-width: 0; height: 18px; padding: 0 4px; font-size: 10px; }
+.ed-tools .btn:active { padding: 1px 3px 0 5px; }
+
+.ed-bullet { display: flex; align-items: baseline; gap: 6px; padding: 2px 0; font-size: 11px; }
+.ed-bullet-n { color: var(--dim); flex: 0 0 auto; }
+.ed-bullet-t { flex: 1 1 auto; overflow-wrap: anywhere; }
+.ed-bullet .btn-icon { width: 16px; height: 16px; flex: 0 0 auto; font-size: 9px; }
+
+.ed-sub { font-size: 11px; color: var(--dim); margin: 4px 0; overflow-wrap: anywhere; }
+
+.btn.ed-wide { width: 100%; margin-bottom: 6px; }
+
+.ed-bar {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding-top: 6px;
+  box-shadow: inset 0 1px 0 var(--shadow), inset 0 2px 0 var(--hilite);
+}
+.ed-count { font-size: 10px; color: var(--dim); text-align: right; }
+
 /* =========================================================== utilities === */
 
 .nowrap { white-space: nowrap; }

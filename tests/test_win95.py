@@ -20,6 +20,8 @@ from app.main import app
 STATIC = __import__("pathlib").Path(__file__).resolve().parent.parent / "app" / "static"
 SHELL = (STATIC / "win" / "shell.js").read_text(encoding="utf-8")
 APP = (STATIC / "win" / "app.js").read_text(encoding="utf-8")
+EDITOR = (STATIC / "win" / "editor.js").read_text(encoding="utf-8")
+MODEL = (STATIC / "win" / "editor-model.js").read_text(encoding="utf-8")
 CSS = (STATIC / "win" / "win95.css").read_text(encoding="utf-8")
 HTML = (STATIC / "index.html").read_text(encoding="utf-8")
 
@@ -89,7 +91,10 @@ def test_the_screen_fits_the_desktop_and_the_taskbar() -> None:
     ("about", "openAbout"),
 ])
 def test_each_window_opens_and_is_reachable(window_id: str, opener: str) -> None:
-    assert f"id: '{window_id}'" in APP, f"{window_id} has no id"
+    # The editor's window is created in editor.js, the rest in app.js. Search
+    # both, or this test quietly stops covering the editor.
+    everywhere = APP + EDITOR
+    assert f"id: '{window_id}'" in everywhere, f"{window_id} has no id"
     assert f"function {opener}(" in APP, f"{opener} is missing"
     assert opener in APP.split("window.Sheetsworks =")[1], \
         f"{opener} is not reachable from the app surface"
@@ -399,6 +404,90 @@ def test_every_window_record_property_that_is_read_is_also_written() -> None:
     missing = sorted(read - written - {"iconName"})
     assert not missing, (
         f"read off a window record but never assigned to it: {missing}"
+    )
+
+
+def test_no_file_references_a_global_that_does_not_exist() -> None:
+    """Regression, caught the moment the editor landed.
+
+    `editor.js` is wrapped as `(function (global) {...})(window)`, so inside it
+    `global` is a parameter. `app.js` is `(function () {...})()` -- no parameter
+    -- and browsers do not define a global `global` at all. Writing
+    `global.EditorForm` there is a ReferenceError, and it happened during boot,
+    so the desktop never came up.
+
+    The harness reported it as one line: "boot never completed". A guard that
+    fails loudly beats a blank page.
+    """
+    for name, src in (("app.js", APP), ("editor.js", EDITOR),
+                      ("shell.js", SHELL), ("editor-model.js", MODEL)):
+        takes_global = re.search(r"\(function\s*\(\s*global\s*\)", src)
+        body = re.sub(r"/\*.*?\*/", "", src, flags=re.DOTALL)
+        for i, line in enumerate(body.splitlines(), 1):
+            if not re.search(r"(?<![\w.])global\.", line):
+                continue
+            if takes_global:
+                continue
+            # Otherwise it must be node's own `global`, which only exists in the
+            # model file's fallback.
+            assert name == "editor-model.js", (
+                f"{name}:{i} uses `global.` but does not take it as a parameter"
+            )
+
+
+def test_every_front_end_script_is_loaded_in_order() -> None:
+    """shell, then sample and model, then the form, then the app that opens it.
+    Getting this wrong is a ReferenceError at boot."""
+    order = ["shell.js", "sample.js", "editor-model.js", "editor.js", "app.js"]
+    positions = []
+    for name in order:
+        tag = f'src="/static/win/{name}"'
+        assert tag in HTML, f"{name} is not loaded by index.html"
+        positions.append(HTML.index(tag))
+    assert positions == sorted(positions), f"loaded out of order: {order}"
+
+
+def test_the_editor_form_only_talks_to_the_model() -> None:
+    """The split is the whole point: rules in the model, drawing in the form.
+    If the form starts building profile shapes itself, the two drift."""
+    assert "EditorModel" in EDITOR
+    assert "M.setField" in EDITOR
+    assert "M.addEntry" in EDITOR
+    assert "M.removeEntry" in EDITOR
+    assert "M.moveEntry" in EDITOR
+    assert "M.validate" in EDITOR
+    # And it must not hand-roll the shapes the model exists to guarantee.
+    for forbidden in ("raw_facts", "Object.assign({}, BULLET",
+                      "grade: { value:", "bullets: ['"):
+        assert forbidden not in EDITOR, f"the form is building {forbidden} itself"
+
+
+def test_the_form_adopts_a_reloaded_profile() -> None:
+    """Regression, caught by screenshotting.
+
+    app.js and editor.js each hold a reference to the profile, and the app
+    reloads it from the server on every boot. The form kept the empty object it
+    had been opened with, so the window said "My Resume - Dusht Verma" while
+    every section read as empty. The form's refresh must take the new object.
+    """
+    body = EDITOR.split("function refresh(", 1)[1][:600]
+    assert "newProfile" in body, "refresh must be able to accept a new profile"
+    assert "state.profile = newProfile" in body, (
+        "and must actually adopt it, or the form shows stale data"
+    )
+    # Every caller must pass it.
+    for call in re.findall(r"EditorForm\.refresh\([^)]*\)", APP):
+        assert "state.profile" in call, f"refresh called without the profile: {call}"
+    # And the title must come from the form, not be written behind its back.
+    assert "titleBase()" in EDITOR
+
+
+def test_read_only_fields_do_not_look_editable() -> None:
+    """The contact links box looked like a field, accepted typing, and discarded
+    it. Silently dropping what someone typed is worse than not offering the box."""
+    body = EDITOR.split("if (spec.kind === 'contact')", 1)[1][:1400]
+    assert "readOnly = true" in body, (
+        "the links display must be read-only, not a field that eats input"
     )
 
 

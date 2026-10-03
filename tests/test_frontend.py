@@ -34,7 +34,11 @@ OLD_JS = f"{STATIC}/win/old-app.js"
 OLD_CSS = f"{STATIC}/win/old-term.css"
 OLD_HTML = f"{STATIC}/win/terminal.html"
 
-ALL_JS = (JS, APP_JS, OLD_JS)
+MODEL_JS = f"{STATIC}/win/editor-model.js"
+EDITOR_JS = f"{STATIC}/win/editor.js"
+SAMPLE_JS = f"{STATIC}/win/sample.js"
+
+ALL_JS = (JS, APP_JS, MODEL_JS, EDITOR_JS, SAMPLE_JS, OLD_JS)
 ALL_CSS = (CSS, OLD_CSS)
 
 
@@ -56,7 +60,7 @@ def strip_js_comments(source: str) -> str:
 
 @pytest.fixture(scope="module")
 def js() -> str:
-    return read(JS) + "\n" + read(APP_JS)
+    return "\n".join(read(p) for p in (JS, APP_JS, MODEL_JS, EDITOR_JS, SAMPLE_JS))
 
 
 @pytest.fixture(scope="module")
@@ -279,9 +283,10 @@ def test_localstorage_is_guarded(js: str) -> None:
 def test_the_desktop_is_announced_to_assistive_tech() -> None:
     """Windows are regions, the Start menu is a menu, and the tray is a live
     region -- otherwise a screen reader has no idea what any of it is."""
-    js = read(APP_JS)
-    assert 'role: ' in js or 'role="' in js
+    js = read(APP_JS) + read(EDITOR_JS) + read(JS)
     html = read(HTML)
+    assert "setAttribute('role'" in js, "windows and controls must declare a role"
+    assert 'aria-label' in js, "windows must announce themselves"
     assert 'aria-label="Start menu"' in html
     assert 'aria-haspopup="true"' in html
     assert 'aria-expanded="false"' in html

@@ -276,6 +276,77 @@ is `document.elementFromPoint()` at the control's centre — "what is under the
 cursor?" — plus a real `.click()`. That is now in the harness, and it also
 caught the harness's own full-screen log overlay intercepting pointer events.
 
+### Stage 5b: the editor
+
+The My Resume window is a real form. Two files, split on purpose:
+
+- **`win/editor-model.js`** — every rule about editing a resume, as pure
+  functions over a plain profile object. No DOM anywhere. This is the
+  replacement for the terminal engine, and it is why the archived tests' worth
+  of behaviour could be rebuilt without faking a terminal: the model loads
+  straight into node and can be asked things directly.
+- **`win/editor.js`** — draws the form and moves values in and out. It builds
+  itself from `EditorModel.SECTIONS`, so a field cannot exist in the form and be
+  missing from the model. A test asserts the form never hand-rolls a profile
+  shape the model exists to guarantee.
+
+A section list on the left, the selected section's fields on the right, and
+Save / Undo / Close underneath. Autosave is debounced, the title bar carries the
+`*` unsaved marker, and closing with unsaved work asks first.
+
+#### Why the model is the careful part
+
+Every bug in Stage 3 was a *shape* bug, not a logic bug. Each is now a named,
+tested rule rather than a thing that happens to work:
+
+| Stage 3 bug | Now |
+|---|---|
+| bullets written as bare strings; API 422s | `makeBullet` — always an object |
+| `summary` written as `{text: …}` into a string field | text sections are strings |
+| `grade 8.7` produced `{"grade": "8.7"}` | `{"value", "scale"}` |
+| `link` overwrote `contact.link` | appends to `links[]` |
+| legacy string bullets | normalised on the way in |
+| no clue which field the API would reject | `required` per section, named in `validate()` |
+
+#### Five bugs found building it
+
+1. **`setField` was 0-based while everything else was 1-based.** Editing entry 1
+   silently edited entry 2. Reads as "the form is a bit odd"; invisible in source.
+2. **`moveEntry` computed the insert position against the pre-removal
+   numbering**, producing `[First, Third, Second]` when asked for
+   `[Third, First, Second]`.
+3. **`blankEntry` gave every entry an `id`, but `SkillGroup` has no `id` in
+   models.py** — so a new skill group could not be saved. Found by handing the
+   model's output to the real API and watching it 422.
+4. **`app.js` used `global.EditorForm`, but `app.js` is `(function(){…})()`** — no
+   `global` parameter, and browsers do not define a `global`. A ReferenceError
+   during boot, so the desktop never came up. The harness reported it in one
+   line: "boot never completed".
+5. **The form showed every section as empty while the title bar read "Dusht
+   Verma."** `app.js` and `editor.js` each held their own reference to the
+   profile; the app reloaded it from the server on boot and the form kept the
+   empty object it was opened with. `refresh()` now adopts the new profile, and
+   a test asserts every caller passes it. Found by screenshotting — no assertion
+   would have caught it.
+
+Also: the contact *links* box looked like a field, accepted typing, and silently
+discarded it. Now read-only, because silently dropping what someone typed is
+worse than not offering the box.
+
+#### Coverage rebuilt
+
+`tests/test_editor_model.py` drives the model under node — 18 tests over the
+shape rules, scalar fields, list operations, counting, validation and undo. The
+last is the strongest available: it builds a profile entirely through the model,
+`PUT`s it to the live API, asserts it round-trips, and exports all three formats.
+
+The browser harness now **types into the form**: selects sections, fills fields,
+clicks New, waits for the debounced autosave, then reads the profile back from
+the server to confirm it arrived. A form that renders correctly and does not save
+is exactly the failure that got through in Stage 3.
+
+466 tests pass. 118 browser checks pass.
+
 ### Security pass (tests in `tests/test_security.py`)
 DNS rebinding closed with `TrustedHostMiddleware`; over-nested JSON (~6KB of `[`) caused a 500 + traceback, now 422; invisible/control characters (NUL, U+202E, zero-width, bidi isolates, BOM, DEL) rejected naming the code point; list fields capped 60/12/20. Security headers on every response with **two CSPs** — `default-src 'none'` for API routes, `default-src 'self'` for the page (the strict API policy would otherwise have blanked the UI). Exports sent `no-store`. Verified **not** vulnerable with tests: SQL injection (queries parameterised), CORS absent by design, no secret in any response.
 

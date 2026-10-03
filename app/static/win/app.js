@@ -288,6 +288,9 @@ function openDisplay() {
       list.querySelectorAll('.listbox-row').forEach((r) => {
         r.setAttribute('aria-selected', String(r === picked));
       });
+      // The editor marks the sections this template will not print, so the
+      // choice is visible where the writing actually happens.
+      if (window.EditorForm) window.EditorForm.setTemplate(state.template);
       renderTemplateHint();
     });
     box.appendChild(list);
@@ -513,75 +516,41 @@ async function refreshPreview(winId) {
   }
 }
 
-/* ---- Resume Editor: the stub the real form lands in -------------------- */
+/* ---- Resume Editor ------------------------------------------------------ */
+/* The form itself lives in editor.js and builds from editor-model.js. This is
+   only the door: open it if it is not already open, and refresh it if it is. */
 
 function openEditor() {
-  return once('editor', () => {
-    const rec = W.createWindow({
-      id: 'editor', title: 'My Resume', icon: 'resume',
-      w: 640, h: 460,
-      menus: [
-        { label: 'File', items: [
-          { label: 'Save', accel: 'Ctrl+S', action: () => saveProfile() },
-          { sep: true },
-          { label: 'Close', accel: 'Alt+F4', action: () => W.close('editor') },
-        ] },
-        { label: 'Edit', items: [
-          { label: 'Undo', accel: 'Ctrl+Z', disabled: true },
-        ] },
-        { label: 'View', items: [
-          { label: 'Preview', action: openPreview },
-          { label: 'File Manager', action: openFileManager },
-        ] },
-        { label: 'Help', items: [{ label: 'Read Me', action: openReadMe }] },
-      ],
-      toolbar: [
-        { icon: 'save',   label: 'Save',   action: () => saveProfile() },
-        { icon: 'find',   label: 'Preview', action: openPreview },
-        { sep: true },
-        { icon: 'folderOpen', label: 'Sections', action: openFileManager },
-      ],
-      statusText: 'Ready',
-    });
-
-    const fill = el('div', 'well-fill');
-    const note = el('div');
-    note.appendChild(el('div', null,
-      'This is where the editor form goes.'));
-    const sub = el('div', 'dim',
-      'Stage 5b replaces this panel with the real section editor. The window ' +
-      'manager, menus, toolbar, status bar and loading states around it are ' +
-      'already the finished article, which is why they are being demonstrated ' +
-      'on a placeholder: nothing around this panel will need to move.');
-    sub.style.fontSize = '10px';
-    sub.style.marginTop = '6px';
-    note.appendChild(sub);
-
-    // Live progress, so the indeterminate bar and the percentage bar can both
-    // be seen working against something real.
-    const bar = el('div', 'bar');
-    bar.setAttribute('data-progress', 'main');
-    const fillBar = el('div', 'bar-fill');
-    bar.appendChild(fillBar);
-    bar.style.marginTop = '10px';
-    note.appendChild(bar);
-
-    const barLabel = el('div', 'dim', 'Not started');
-    barLabel.style.fontSize = '10px';
-    barLabel.setAttribute('data-role', 'progress-label');
-    note.appendChild(barLabel);
-
-    fill.appendChild(note);
-    rec.body.appendChild(fill);
-    return rec;
+  const existing = W.windows.get('editor');
+  if (existing) {
+    W.restore('editor');
+    window.EditorForm.refresh(state.profile);
+    return existing;
+  }
+  if (!state.profile) {
+    // Nothing to edit yet. An empty profile is still editable -- contact first.
+    state.profile = emptyProfile();
+  }
+  return window.EditorForm.open(state.profile, {
+    template: state.template,
+    onChanged: () => { refreshPreviewSoon(); },
   });
+}
+
+function emptyProfile() {
+  return {
+    contact: { name: '', email: '', phone: '', city: '', country: '', links: [] },
+    summary: '', interests: '',
+    education: [], experience: [], projects: [], skills: [],
+    certifications: [], achievements: [], extracurriculars: [], publications: [],
+  };
 }
 
 async function saveProfile(label) {
   if (!state.profile) {
     await W.messageBox({
       title: 'Sheetsworks', icon: 'warning', heading: 'Nothing to save',
-      message: 'There is no profile yet. The editor form arrives in the next stage.',
+      message: 'There is no profile yet. Open My Resume and fill in your contact details.',
       buttons: ['OK'],
     });
     return;
@@ -590,6 +559,20 @@ async function saveProfile(label) {
     method: 'PUT', body: state.profile,
   }));
   W.setStatus('editor', (label || 'Profile') + ' - saved', 'right');
+  if (state.profile.contact && state.profile.contact.name) {
+    const rec = W.windows.get('editor');
+    if (rec) rec.title.textContent = 'My Resume - ' + state.profile.contact.name;
+  }
+}
+
+/* Refresh the preview after an edit, but not on every keystroke. */
+let previewSoonTimer = null;
+function refreshPreviewSoon() {
+  if (previewSoonTimer) clearTimeout(previewSoonTimer);
+  previewSoonTimer = setTimeout(() => {
+    previewSoonTimer = null;
+    if (W.windows.get('preview')) refreshPreview('preview');
+  }, 900);
 }
 
 /* ---- AI notice ---------------------------------------------------------- */
@@ -728,30 +711,21 @@ async function boot() {
   buildTaskbar();
 
   const rec = openEditor();
-  W.progress('editor', 'main', 0.35);
   W.setStatus('editor', 'Loading profile...', 'right');
-  const label = rec.el.querySelector('[data-role="progress-label"]');
-  if (label) label.textContent = 'Contacting server...';
 
   try {
     const res = await api('/profile');
     state.profile = await res.json();
     W.setStatus('editor', 'Ready', 'right');
-    if (label) {
-      label.textContent = 'Loaded — ' +
-        (state.profile.contact && state.profile.contact.name || 'no name yet');
-    }
-    W.progress('editor', 'main', 1);
+    window.EditorForm.refresh(state.profile);
   } catch (err) {
     state.profile = null;
-    W.setStatus('editor', 'No profile saved yet', 'right');
-    if (label) label.textContent = 'No profile saved yet — this is a fresh start.';
-    W.progress('editor', 'main', 1);
+    W.setStatus('editor', 'No profile saved yet - this is a fresh start', 'right');
   }
 
-  rec.title.textContent = 'My Resume'
-    + (state.profile && state.profile.contact && state.profile.contact.name
-      ? ' - ' + state.profile.contact.name : '');
+  if (state.profile && state.profile.contact && state.profile.contact.name) {
+    rec.title.textContent = 'My Resume - ' + state.profile.contact.name;
+  }
 
   if (state.sound) W.sfx.setEnabled(true);
 
