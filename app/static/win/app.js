@@ -763,7 +763,7 @@ async function boot() {
     const map = {
       editor: openEditor, fm: openFileManager, readme: openReadMe,
       preview: openPreview, display: openDisplay, about: openAbout,
-      ai: openAiNotice, exit: confirmExit,
+      ai: openAiNotice, exit: confirmExit, sample: loadSample,
     };
     let i = 0;
     const step = () => {
@@ -787,7 +787,7 @@ async function boot() {
 function requestedWindows() {
   if (typeof location === 'undefined' || !location || !location.search) return [];
   const KNOWN = ['editor', 'fm', 'readme', 'preview', 'display', 'about',
-                  'ai', 'exit'];
+                  'ai', 'exit', 'sample'];
   try {
     const raw = new URLSearchParams(location.search).get('open') || '';
     return raw.split(',').map((s) => s.trim()).filter((s) => KNOWN.indexOf(s) !== -1);

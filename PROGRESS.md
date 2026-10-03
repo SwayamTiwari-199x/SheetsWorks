@@ -235,6 +235,47 @@ synchronously before its async body, so a harness that dies early says so.
   list needs an endpoint that does not exist. This is the first thing Stage 5b
   should add.
 
+### The freeze: reported by the user, and the worst bug so far
+
+Clicking **Sample Resume** froze the whole desktop. Mouse moved, the Start menu
+opened, and no window responded.
+
+**Cause: the veil was stacked above the dialog it was meant to dim.** `#veil`
+sat at `z-index: 900`; windows stacked from `zTop = 20`. So every modal dialog
+rendered *underneath* the veil — faintly visible through 18% black, and every
+click landing on a full-screen div. The taskbar (1000) and Start menu (950) were
+above the veil, which is exactly the reported symptom: the Start menu opened and
+nothing else did.
+
+It survived **440 passing tests** because nothing asked what was under the
+cursor. Every dialog check asserted existence, focus, `veil.classList.contains
+('on')`, and a *synthetic* `KeyboardEvent` — which goes straight to a document
+listener and never touches the veil. Escape worked the whole time. The app was
+unusable and the suite was green.
+
+The fix: an explicit stacking scale (`Z_VEIL` 900, `Z_MODAL` 950, `Z_POPUP`
+1050, `Z_TASKBAR` 1100) declared once in `shell.js` and mirrored in the CSS, with
+`focusWindow` forcing a modal above the veil. There is now a test that fails if
+the two files disagree, if anything is layered between the veil and a modal, or
+if the taskbar drops below one.
+
+**And a second bug the screenshot then exposed.** With the dialog finally on
+top, it rendered translucent — the File Manager showed through it. Computed
+style: `opacity: 0`, `classes="win dialog opening"`. The opening class was only
+ever removed by `animationend`, which does not fire when an animation is
+cancelled, when the tab is backgrounded, or when `prefers-reduced-motion` sets
+`animation: none`. A stuck `opening` class means opacity 0 — **a window that is
+present, focusable and completely invisible.** `close()` already had a timeout
+fallback for precisely this reason; the open path did not, which is why one was
+found by looking and the other was not. Both now fall back to a timer.
+
+**The lesson, recorded because it is the most valuable thing here:** asserting
+that a control *exists*, is *focused*, and *responds to a synthetic event* is not
+the same as asserting a human can *use* it. The check that actually catches this
+is `document.elementFromPoint()` at the control's centre — "what is under the
+cursor?" — plus a real `.click()`. That is now in the harness, and it also
+caught the harness's own full-screen log overlay intercepting pointer events.
+
 ### Security pass (tests in `tests/test_security.py`)
 DNS rebinding closed with `TrustedHostMiddleware`; over-nested JSON (~6KB of `[`) caused a 500 + traceback, now 422; invisible/control characters (NUL, U+202E, zero-width, bidi isolates, BOM, DEL) rejected naming the code point; list fields capped 60/12/20. Security headers on every response with **two CSPs** — `default-src 'none'` for API routes, `default-src 'self'` for the page (the strict API policy would otherwise have blanked the UI). Exports sent `no-store`. Verified **not** vulnerable with tests: SQL injection (queries parameterised), CORS absent by design, no secret in any response.
 

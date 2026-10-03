@@ -452,6 +452,8 @@ textarea.field { height: auto; resize: none; padding: 4px; line-height: 1.35; }
   position: absolute;
   inset: 0 0 var(--taskbar-h) 0;
   background: rgba(0, 0, 0, .18);
+  /* Below a modal dialog (see Z_VEIL in shell.js). Above it, a dialog is
+     visible but unclickable and the whole desktop appears frozen. */
   z-index: 900;
   display: none;
 }
@@ -465,7 +467,7 @@ textarea.field { height: auto; resize: none; padding: 4px; line-height: 1.35; }
   background: var(--face);
   box-shadow: var(--bevel-out);
   padding: 2px;
-  z-index: 950;
+  z-index: 1050;
 }
 .menu-item {
   display: flex;
@@ -493,7 +495,7 @@ textarea.field { height: auto; resize: none; padding: 4px; line-height: 1.35; }
   align-items: center;
   gap: 3px;
   padding: 2px 2px 2px 2px;
-  z-index: 1000;
+  z-index: 1100;
 }
 #startBtn {
   height: 22px;
@@ -548,7 +550,7 @@ textarea.field { height: auto; resize: none; padding: 4px; line-height: 1.35; }
   background: var(--face);
   box-shadow: var(--bevel-out);
   padding: 2px;
-  z-index: 950;
+  z-index: 1100;
   display: none;
 }
 #startMenu.open { display: block; }

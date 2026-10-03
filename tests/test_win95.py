@@ -461,6 +461,93 @@ def test_the_profile_is_never_cached() -> None:
         assert r.headers["cache-control"] == "no-store"
 
 
+def css_block(css: str, selector: str) -> str:
+    """The rule for one selector, braces included."""
+    i = css.index(selector + " {")
+    return css[i:css.index("}", i)]
+
+
+def test_a_modal_dialog_stacks_above_its_own_veil() -> None:
+    """Regression, and the worst one yet: clicking Sample Resume froze the
+    entire desktop.
+
+    The veil sat at z-index 900 while windows stacked from 20, so every modal
+    dialog rendered *underneath* the thing meant to dim it -- visible through 18%
+    black and completely unclickable, because a full-screen div was swallowing
+    every click aimed at it. The taskbar and Start menu were above the veil,
+    which is why the Start menu still opened while no window responded.
+
+    It survived 435 passing tests because nothing asked what was under the
+    cursor. Escape still worked, so the synthetic key event the harness
+    dispatched never touched the veil.
+    """
+    veil_z = int(re.search(r"z-index:\s*(\d+)", css_block(CSS, "#veil")).group(1))
+    assert veil_z > 0
+
+    # The shell names the same numbers, so the two files cannot drift apart.
+    assert f"const Z_VEIL = {veil_z};" in SHELL, (
+        "the stylesheet's veil z-index and the shell's Z_VEIL disagree"
+    )
+    modal_z = int(re.search(r"const Z_MODAL = (\d+)", SHELL).group(1))
+    assert modal_z > veil_z, "a modal must clear the veil it raises"
+
+    # And focusWindow must apply it, not merely define it.
+    focus = SHELL.split("function focusWindow(", 1)[1][:700]
+    assert "Z_MODAL" in focus, "focusWindow never raises a modal above the veil"
+    assert "rec.modal" in focus
+
+    # Nothing may sit between the veil and a modal.
+    every = {int(z) for z in re.findall(r"z-index:\s*(\d+);", CSS)}
+    between = sorted(z for z in every if veil_z < z < modal_z)
+    assert not between, f"something is layered over a modal: {between}"
+
+
+def test_the_taskbar_and_start_menu_stay_above_a_modal() -> None:
+    """They must stay usable while a dialog is up -- which is also why the freeze
+    was so confusing: the Start menu opened and nothing else did."""
+    modal_z = int(re.search(r"const Z_MODAL = (\d+)", SHELL).group(1))
+    for anchor in ("#taskbar", "#startMenu"):
+        block = css_block(CSS, anchor)
+        z = int(re.search(r"z-index:\s*(\d+)", block).group(1))
+        assert z > modal_z, f"{anchor} must stay above a modal, got {z}"
+
+
+def test_the_veil_never_swallows_a_click() -> None:
+    """The veil exists to dim the desktop, not to catch the pointer. Were it
+    above a dialog again the failure would be silent: the app would look alive
+    and respond to nothing."""
+    assert "pointer-events" not in css_block(CSS, "#veil")
+
+
+def test_the_opening_animation_never_owns_the_resting_state() -> None:
+    """Regression. `createWindow` added the `opening` class and removed it on
+    `animationend` alone. animationend does not fire when an animation is
+    cancelled, when the tab is backgrounded, or when prefers-reduced-motion sets
+    `animation: none` -- and a stuck `opening` class means opacity 0, so the
+    window is present, focusable and completely invisible.
+
+    `close()` already had a timeout fallback for exactly this reason; the open
+    path did not, which is why one was found by looking and the other was not.
+    """
+    body = SHELL.split("function createWindow(", 1)[1][:6000]
+    assert "win.classList.add('opening')" in body
+    assert "animationend" in body
+    assert "setTimeout(opened" in body, (
+        "the opening class needs a timeout fallback, not only animationend"
+    )
+    # The closing path must keep its own fallback.
+    assert "setTimeout(() => { if (rec.el.parentNode) done(); }" in SHELL
+
+
+def test_a_window_paints_its_own_face() -> None:
+    """A dialog must be opaque. Checked in the browser harness by hit-testing the
+    middle of one, but the invariant belongs here too: a window that shows what
+    is behind it looks broken even when it behaves."""
+    face = css_block(CSS, ".win")
+    assert "background: var(--face)" in face
+    assert "transparent" not in face
+
+
 def test_nothing_loads_from_the_network() -> None:
     for banned in ("@import", "fonts.googleapis", "http://", "https://", "url("):
         assert banned not in CSS, f"win95.css reaches outside via {banned}"

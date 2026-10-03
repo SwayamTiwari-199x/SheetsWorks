@@ -162,6 +162,24 @@ const sfx = (function () {
 
 const wins = new Map();     // id -> record
 let zTop = 20;
+
+/* Stacking, bottom to top: ordinary windows, then the veil that dims them for a
+   modal, then the modal itself, then popup menus, then the taskbar.
+
+   A modal has to sit ABOVE its own veil. Windows stack from 20 and the veil is
+   at 900, so without this every dialog rendered underneath the thing meant to
+   dim it: faintly visible through 18% black, and completely unclickable,
+   because a full-screen div was swallowing every click aimed at it. The taskbar
+   and Start menu sit above the veil, which is why the Start menu still opened
+   while no window responded at all.
+
+   Found by clicking, not by reading. The synthetic Escape the harness
+   dispatched went straight to a document keydown listener and never touched the
+   veil, so every automated check passed while the app was unusable. */
+const Z_VEIL = 900;
+const Z_MODAL = 950;
+const Z_POPUP = 1050;
+const Z_TASKBAR = 1100;
 let activeId = null;
 let cascade = 0;
 
@@ -338,8 +356,16 @@ function createWindow(opts) {
   win.setAttribute('data-icon', rec.iconName);
   wins.set(id, rec);
 
+  // The opening animation, with a guaranteed cleanup. animationend does not
+  // fire when an animation is cancelled, when the tab is backgrounded, or when
+  // prefers-reduced-motion sets `animation: none` -- and a stuck `opening`
+  // class means opacity 0, i.e. a window that is present, focusable and
+  // completely invisible. Correctness must not depend on an animation running.
+  // Same reasoning as close()'s fallback below.
   win.classList.add('opening');
-  win.addEventListener('animationend', () => win.classList.remove('opening'), { once: true });
+  const opened = () => win.classList.remove('opening');
+  win.addEventListener('animationend', opened, { once: true });
+  setTimeout(opened, 250);
 
   focusWindow(id);
   buildTaskButtons();
@@ -364,7 +390,9 @@ function focusWindow(id) {
   if (!rec) return;
   if (activeId === id && rec.el.style.zIndex) return;
   activeId = id;
-  zTop += 1;
+  // A modal must clear the veil it raises. See the stacking note above.
+  if (rec.modal) zTop = Math.max(zTop + 1, Z_MODAL);
+  else zTop += 1;
   rec.el.style.zIndex = String(zTop);
   wins.forEach((r) => r.el.setAttribute('data-active', String(r.id === id)));
   buildTaskButtons();
