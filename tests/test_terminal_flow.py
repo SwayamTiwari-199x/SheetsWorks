@@ -1,9 +1,16 @@
-"""Drive app.js's command logic for real, outside a browser.
+"""Drive the terminal command logic for real, outside a browser.
 
-app.js is an IIFE with no exports, so each test loads it into a minimal DOM stub
-under node and then types commands into it. This catches the logic bugs that
-static grepping cannot: a draft that never commits, an edit that silently does
-nothing, a reorder that corrupts the array.
+The engine is an IIFE with no exports, so each test loads it into a minimal DOM
+stub under node and then types commands into it. This catches the logic bugs
+that static grepping cannot: a draft that never commits, an edit that silently
+does nothing, a reorder that corrupts the array.
+
+Retargeted 2026-10-03. The terminal was replaced by a Windows 95 desktop, so
+this file now drives the ARCHIVED engine at app/static/win/old-app.js rather
+than the shipped page. The point is not to keep dead code alive: it is not to
+delete the coverage quietly either. These 90-odd tests found five real defects
+in Stage 3, and Stage 5b writes equivalent tests against the new editor model,
+so the behaviours stay guarded once the terminal itself goes.
 
 Skipped when node is not installed.
 """
@@ -18,7 +25,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-APP_JS = ROOT / "app" / "static" / "app.js"
+APP_JS = ROOT / "app" / "static" / "win" / "old-app.js"
 
 pytestmark = pytest.mark.skipif(
     shutil.which("node") is None, reason="node is required to execute app.js"

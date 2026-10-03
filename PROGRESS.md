@@ -90,6 +90,74 @@ Two of my own earlier guards fired correctly and were rewritten rather than dele
 
 Also worth recording from the earlier template work: **two existing tests were asserting a buggy data shape** (`summary` stored as `{text: ...}` instead of a string). A test that pins incorrect behaviour is indistinguishable from one that protects correct behaviour.
 
+### Stage 5a: the Windows 95 desktop (branch `design/win95`)
+
+The terminal is gone as an interface. This branch serves a Windows 95 desktop:
+free-floating overlapping windows, a menu bar and toolbar per window, a status
+bar with a grip, dialogs with OK/Cancel/Help, and a taskbar.
+
+**The taskbar was not in the brief and I added it anyway.** The brief asked for
+free-floating windows; overlapping windows hide behind each other, and the
+taskbar is both the period-correct answer and the fix. Without it the desktop
+becomes a trap with four windows and no way to reach the one underneath.
+
+### Decisions taken without asking
+
+- **Zero dependencies.** A Win95 bevel is four `box-shadow` insets; the icons
+  are inline SVG; the sounds are WebAudio oscillators. Nothing does this better
+  in a library than 40 lines of CSS does, and a library would be one more thing
+  to load, audit and keep current.
+- **Fonts:** `Tahoma` / `MS Sans Serif` for chrome (a very close metric match to
+  the original, present on Windows, zero download — and `style-src` has no
+  `'unsafe-inline'`, so a remote font was never an option), `Fixedsys` /
+  `Courier New` for the DOS-ish windows. Verified by measuring the rendered
+  width of each candidate: Tahoma resolves, MS Sans Serif does not exist on any
+  modern Windows, so the fallback chain matters.
+- **The 94 terminal tests were retargeted, not deleted.** They now drive the
+  archived engine at `static/win/old-app.js` and still pass. They found five
+  real defects in Stage 3; deleting them quietly would throw that away. Stage 5b
+  writes the equivalents against the new editor model, and the archive plus its
+  tests are removed together at the end.
+
+### Bugs found in Stage 5a
+
+Two of these were caught by the ported tests, which is the argument for not
+deleting them:
+
+1. **The preview lost its escape hatch.** Moving the preview into a window, I
+   dropped `#previewFallback` and `#previewOpen` — the exact omission that once
+   made the live preview a silent white rectangle, because the iframe is fed a
+   `blob:` URL and a browser that refuses it reports nothing. Caught by a ported
+   test. Restored, and asserted in both test files now.
+2. **No global error boundary.** The terminal had `window.addEventListener('error')`.
+   The new shell did not, so an uncaught throw would have killed the desktop
+   silently. Caught by a ported test. Added, with a cap so a reporter that
+   itself throws cannot loop.
+3. **The File Manager's list boxes were 17px tall** — the shared `.row` utility's
+   `align-items: flex-end`. Correct in the source, broken on screen. Found by
+   measuring the real rendered geometry.
+4. **The Display dialog put OK/Cancel/Help above the group box they act on**,
+   because the button bar was appended before the content. Found by screenshot.
+5. Dialogs were sized for a window rather than their text, leaving a message box
+   with a button at the top and a third of a screen of grey beneath it.
+6. The cascade opened at the very corner and buried the desktop icon column.
+
+### The motion, honestly
+
+1995 had **no animation at all** — all of its character came from bevels. So the
+bevels here are pixel-faithful and the motion is a deliberate, restrained
+addition on top: a 110ms window open, a button press (inverted bevel plus a 1px
+content shift, which *is* authentic), and real period loading feedback — hourglass
+cursor, ellipsis in the title bar, segmented progress blocks in the status bar,
+a scrolling marquee. All of it behind `prefers-reduced-motion`.
+
+### Security posture carried over
+
+`innerHTML` is banned in the new UI as before — icons go through `DOMParser` on
+`image/svg+xml`, which has no script execution and no HTML fallback, so there is
+no path from an icon string to anything executable. The CSP, the two-policy
+split, and the six-route surface are unchanged.
+
 ### Security pass (tests in `tests/test_security.py`)
 DNS rebinding closed with `TrustedHostMiddleware`; over-nested JSON (~6KB of `[`) caused a 500 + traceback, now 422; invisible/control characters (NUL, U+202E, zero-width, bidi isolates, BOM, DEL) rejected naming the code point; list fields capped 60/12/20. Security headers on every response with **two CSPs** — `default-src 'none'` for API routes, `default-src 'self'` for the page (the strict API policy would otherwise have blanked the UI). Exports sent `no-store`. Verified **not** vulnerable with tests: SQL injection (queries parameterised), CORS absent by design, no secret in any response.
 

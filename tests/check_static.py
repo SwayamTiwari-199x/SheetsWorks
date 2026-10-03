@@ -1,8 +1,10 @@
-"""Static consistency checks between app.js, index.html and the stylesheets.
+"""Static consistency checks across the front end.
 
-Cheap to run and they catch the class of mistake a redesign actually makes: JS
-reaching for an id the markup does not have, which fails silently at runtime
-with no test failing.
+Cheap, and they catch what a redesign actually gets wrong: JS reaching for an
+element the markup does not have, a palette defined in two places, or a
+stylesheet that quietly started loading something remote.
+
+Not part of pytest on purpose -- it is a pre-commit sweep, not a contract.
 """
 
 import json
@@ -12,110 +14,119 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = ROOT / "app" / "static"
-JS = (STATIC / "app.js").read_text(encoding="utf-8")
+
+SHELL = (STATIC / "win" / "shell.js").read_text(encoding="utf-8")
+APP = (STATIC / "win" / "app.js").read_text(encoding="utf-8")
+CSS = (STATIC / "win" / "win95.css").read_text(encoding="utf-8")
 HTML = (STATIC / "index.html").read_text(encoding="utf-8")
-SITE = (STATIC / "site.css").read_text(encoding="utf-8")
-TERM = (STATIC / "term.css").read_text(encoding="utf-8")
+OLD_JS = (STATIC / "win" / "old-app.js").read_text(encoding="utf-8")
+OLD_CSS = (STATIC / "win" / "old-term.css").read_text(encoding="utf-8")
+OLD_HTML = (STATIC / "win" / "terminal.html").read_text(encoding="utf-8")
 
 failures = []
 
 
-def check(ok: bool, message: str) -> None:
+def check(ok, message):
     if not ok:
         failures.append(message)
 
 
-# --- every id JS asks for must exist in the markup -----------------------
+# --- every id the code asks for must exist -------------------------------
 
-wanted = set(re.findall(r"getElementById\(\s*'([A-Za-z0-9_-]+)'", JS))
-# Ids the code builds for itself, e.g. per-section buttons, never in the markup.
+wanted = set(re.findall(r"getElementById\(\s*'([A-Za-z0-9_-]+)'", SHELL + APP))
 present = set(re.findall(r'id="([A-Za-z0-9_-]+)"', HTML))
 missing = sorted(wanted - present)
-check(not missing, f"app.js asks for ids the markup does not have: {missing}")
+check(not missing, f"code asks for ids the markup lacks: {missing}")
 
-# --- and the reverse, so the markup cannot carry dead weight ---------------
+# --- the archived terminal must still resolve its own assets -------------
 
-KNOWN_DYNAMIC = {
-    # built by refreshNavbar / buildSectionNav / renderNews / renderNotes
-    "nbItems",
-}
-orphans = sorted(
-    pid for pid in present - wanted
-    if pid not in KNOWN_DYNAMIC
-    and not pid.startswith("halftone") and not pid.startswith("sky")
-)
-# Informational, not a failure: some ids are only reached from CSS or from an
-# aria-labelledby, and the New Resume buttons are looked up by variable so this
-# regex cannot see them.
-if orphans:
-    print("markup ids JS never asks for by literal (css/aria/dynamic): "
-          + ", ".join(orphans))
+for ref in re.findall(r'(?:href|src)="(/static/[^"]+)"', OLD_HTML):
+    check((STATIC / ref[len("/static/"):]).exists(),
+          f"terminal.html references {ref}, which does not exist")
 
-# --- stylesheets ----------------------------------------------------------
+# --- nothing loads from the network ---------------------------------------
 
-for name, css in (("site.css", SITE), ("term.css", TERM)):
-    for banned in ("@import", "fonts.googleapis", "cdn.", "http://", "https://"):
-        check(banned not in css, f"{name} reaches outside: {banned}")
-    check("url(" not in css, f"{name} loads an external resource via url()")
+for name, css in (("win95.css", CSS), ("old-term.css", OLD_CSS)):
+    for banned in ("@import", "fonts.googleapis", "cdn.", "http://",
+                   "https://", "url("):
+        check(banned not in css, f"{name} reaches outside via {banned}")
+
+check("@font-face" not in re.sub(r"/\*.*?\*/", "", CSS, flags=re.DOTALL),
+      "no font may be embedded")
 
 # --- the palette lives in exactly one place -------------------------------
 
-defined = set(re.findall(r"html\[data-theme=\"([a-z]+)\"\]", TERM))
-check(defined == {"amber", "green", "matrix", "paper", "vintage"},
-      f"term.css themes are {sorted(defined)}")
-check("data-theme=" not in SITE,
-      "site.css defines a theme; palettes belong in term.css only")
+palette = set(re.findall(r"(--[a-z-]+):", CSS.split("*/", 1)[1]))
+for token in ("--face", "--hilite", "--light", "--shadow", "--dark", "--teal"):
+    check(token in palette, f"{token} missing from the palette")
 
-# --- themes agree with what the app offers --------------------------------
+# --- bevels ---------------------------------------------------------------
 
-themes_js = re.search(r"const THEMES = \[([^\]]*)\]", JS)
-check(themes_js is not None, "THEMES list not found in app.js")
-if themes_js:
-    offered = set(re.findall(r"'([a-z]+)'", themes_js.group(1)))
-    check(offered == defined,
-          f"app.js offers {sorted(offered)} but CSS defines {sorted(defined)}")
+for token in ("--bevel-out", "--bevel-in", "--bevel-out-thin", "--bevel-in-thin"):
+    check(token in CSS, f"{token} missing; the bevels are the whole look")
 
-check('data-theme="vintage"' in HTML, "the page does not start on the vintage theme")
+# --- motion is declared and then switched off -----------------------------
 
-# --- news content arrives from rules.json, escaped -------------------------
+check("@keyframes win-open" in CSS, "no window-open animation")
+reduced = CSS.split("prefers-reduced-motion", 1)
+check(len(reduced) > 1, "no reduced-motion block")
+if len(reduced) > 1:
+    check("animation: none" in reduced[1], "reduced motion does not stop anything")
+
+# --- the tips come from rules.json, escaped -------------------------------
 
 sys.path.insert(0, str(ROOT))
 from app import rules  # noqa: E402
 
 tips = rules.tips()
-check(len(tips) >= 6, f"only {len(tips)} tips; the NEWS panel wants more")
+check(len(tips) >= 6, f"only {len(tips)} tips; the Read Me wants more")
 for tip in tips:
     for key in ("title", "body", "source", "tag"):
         check(key in tip, f"a tip is missing {key}: {tip}")
     check(tip["tag"] in ("verified", "unverified"), f"bad tag on {tip['title']!r}")
 
 payload = json.dumps({"tips": tips}, separators=(",", ":"))
-safe = payload.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+safe = (payload.replace("<", "\\u003c").replace(">", "\\u003e")
+        .replace("&", "\\u0026"))
 check("<" not in safe, "the injected JSON can still contain a raw <")
 check('{"tips": []}' in HTML, "index.html lost its tips placeholder")
 
-# --- the layout pieces the design asked for -------------------------------
+# --- the desktop is built out of the reference's parts ---------------------
 
-for needed in ('id="view-home"', 'id="view-draft"', 'id="view-new"', 'id="view-ai"',
-               'id="rail"', 'id="stage"', 'id="previewPane"', 'id="jumpNav"',
-               'id="sectionNav"', 'id="newsBody"', 'id="progressFill"',
-               'id="tipsData"'):
+for needed in ('id="desktop"', 'id="taskbar"', 'id="startMenu"',
+               'id="tipsData"', 'id="startBtn"'):
     check(needed in HTML, f"markup is missing {needed}")
 
-for nav in ("Home", "Draft", "New Resume", "AI Resume Builder"):
-    check(f">{nav}</button>" in HTML, f"masthead is missing {nav}")
+# --- every window named in ?open= actually opens something ---------------
+# Parsed out of the two places that must agree: the KNOWN allow-list and the
+# name-to-opener map. A name in one and not the other is a deep link that
+# silently does nothing.
 
-# --- no dead legacy selectors ---------------------------------------------
+known = re.findall(r"'([a-z]+)'",
+                   APP.split("const KNOWN = [", 1)[1].split("]", 1)[0])
+map_block = APP.split("const map = {", 1)[1].split("};", 1)[0]
+mapped = dict(re.findall(r"([a-z]+):\s*([A-Za-z_$][\w$]*)", map_block))
 
-check("#previewPane[hidden]" in SITE or "#previewPane[hidden]" in TERM,
-      "the preview pane has no hidden rule, so close would do nothing")
-check("body::after" not in TERM,
-      "scanlines moved to the terminal view; a body-level one would cover the page")
+check(set(known) == set(mapped),
+      f"?open= names and the opener map disagree: "
+      f"only-known={sorted(set(known) - set(mapped))} "
+      f"only-mapped={sorted(set(mapped) - set(known))}")
+for name, fn in mapped.items():
+    check(f"function {fn}(" in APP or f"async function {fn}(" in APP,
+          f"?open={name} maps to {fn}, which does not exist")
+
+# --- the new UI must not smuggle the old one back -------------------------
+
+body = re.sub(r"(?<!:)//[^\n]*", "",
+              re.sub(r"/\*.*?\*/", "", SHELL + APP, flags=re.DOTALL))
+for banned in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write"):
+    check(banned not in body, f"{banned} in the new front end")
 
 if failures:
     print("\nFAILURES:")
     for f in failures:
         print("  -", f)
     raise SystemExit(1)
+
 print(f"static consistency OK: {len(wanted)} ids, {len(tips)} tips, "
-      f"themes {sorted(defined)}")
+      f"{len(known)} deep-linkable windows")

@@ -120,15 +120,15 @@ async def security_and_recursion(request, call_next):
 
 
 @app.get("/", include_in_schema=False)
-def terminal_page() -> Response:
-    """The single-page UI.
+def desktop_page() -> Response:
+    """The single-page UI: a Windows 95 desktop.
 
-    The NEWS panel is filled from rules.json rather than from markup typed into
-    index.html, so the advice on screen is the cited research in RULES.md rather
-    than a paraphrase. It is injected into a <template>, whose contents are
-    never parsed as HTML and never executed, and "<" is escaped so the JSON
-    cannot terminate the element early. No new route: the route surface stays
-    exactly what the stage built.
+    The advice in the Read Me window is filled from rules.json rather than from
+    markup typed into index.html, so what the user reads is the cited research
+    in RULES.md rather than a paraphrase. It is injected into a <template>,
+    whose contents are never parsed as HTML and never executed, and "<" is
+    escaped so the JSON cannot terminate the element early. No new route: the
+    route surface stays exactly what Stage 3 built.
     """
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     payload = json.dumps({"tips": rules.tips()}, separators=(",", ":"))
