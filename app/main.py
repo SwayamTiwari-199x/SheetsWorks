@@ -45,10 +45,13 @@ ALLOWED_HOSTS = ["localhost", "127.0.0.1", "[::1]", "testserver"]
 # Two policies, not one. API responses are data and must never be treated as a
 # document; the terminal page does need to load its own stylesheet and script.
 API_CSP = "default-src 'none'; frame-ancestors 'none'"
+# blob: is required in frame-src: the live preview is rendered to a blob URL in
+# the browser and shown in an iframe. CSP 'self' matches by scheme+host+port, so
+# a blob: frame is blocked without it -- which failed silently as a blank pane.
 PAGE_CSP = (
     "default-src 'self'; style-src 'self'; script-src 'self'; "
-    "img-src 'self' data:; frame-src 'self'; base-uri 'none'; "
-    "form-action 'none'; frame-ancestors 'none'"
+    "img-src 'self' data:; frame-src 'self' blob:; object-src 'none'; "
+    "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 )
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"

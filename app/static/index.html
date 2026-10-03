@@ -35,10 +35,17 @@
   <div id="previewBar">
     <span id="previewTitle">preview.pdf</span>
     <span id="previewMeta"></span>
+    <a id="previewOpen" href="#" target="_blank" rel="noopener">open</a>
     <button id="previewRefresh" type="button" title="Refresh preview (Ctrl+P also toggles)">refresh</button>
     <button id="previewClose" type="button" title="Close preview">close</button>
   </div>
   <iframe id="previewFrame" title="Rendered resume PDF"></iframe>
+  <!-- Shown if the frame cannot render, so a blocked preview is never a silent
+       white box again. -->
+  <div id="previewFallback" hidden>
+    <p>The preview could not be shown in place.</p>
+    <p class="dim">Use <strong>open</strong> above, or <strong>export pdf</strong>.</p>
+  </div>
 </section>
 
 <noscript>

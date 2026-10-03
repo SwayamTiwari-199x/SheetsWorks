@@ -269,6 +269,28 @@ def test_static_files_served() -> None:
         assert c.get("/static/term.css").status_code == 200
 
 
+def test_page_csp_allows_the_preview_blob_frame() -> None:
+    """Regression: the preview pane rendered as a blank white box.
+
+    The iframe is fed a blob: URL. CSP 'self' matches on scheme+host+port, so a
+    blob: frame was blocked outright and the browser reported nothing visible.
+    """
+    with TestClient(app) as c:
+        csp = c.get("/").headers["content-security-policy"]
+    assert "frame-src 'self' blob:" in csp
+    assert "object-src 'none'" in csp
+
+
+def test_preview_pane_has_a_visible_fallback() -> None:
+    """A frame the browser refuses must never be a silent blank rectangle."""
+    html = read(HTML)
+    assert 'id="previewFallback"' in html
+    assert 'id="previewOpen"' in html
+    js = read(JS)
+    assert "previewOpen.href = url" in js
+    assert "el.previewFallback.hidden = false" in js
+
+
 def test_page_gets_a_csp_that_allows_its_own_assets() -> None:
     """Regression: the API's default-src 'none' would have blanked the page."""
     with TestClient(app) as c:

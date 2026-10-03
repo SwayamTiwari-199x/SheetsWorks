@@ -214,6 +214,8 @@ const el = {
   pane: document.getElementById('previewPane'),
   frame: document.getElementById('previewFrame'),
   meta: document.getElementById('previewMeta'),
+  previewOpen: document.getElementById('previewOpen'),
+  previewFallback: document.getElementById('previewFallback'),
 };
 
 // ---------------------------------------------------------------- output
@@ -565,10 +567,16 @@ async function doPreview() {
     const blob = await resp.blob();
     if (seq !== state.previewSeq) return;
     if (el.frame.src.startsWith('blob:')) URL.revokeObjectURL(el.frame.src);
-    el.frame.src = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(blob);
+    el.frame.src = url;
+    // Always leave an escape hatch, so a frame the browser refuses to render is
+    // a visible message rather than a blank white rectangle.
+    el.previewOpen.href = url;
+    el.previewFallback.hidden = true;
   } catch (err) {
     el.meta.textContent = 'preview failed';
     el.meta.setAttribute('data-budget', 'over');
+    el.previewFallback.hidden = false;
   }
 }
 

@@ -20,6 +20,10 @@ CURRENT STAGE: 4 (AI assist per section + interview mode)
 - **Undo from day one** (`u`, `Ctrl+Z`), 60-deep snapshot stack, per the decision to add it while the command set is small.
 - 4 themes (`amber`/`green`/`matrix`/`paper`) via `theme <name>`, persisted. Font stack is local-only — no web font download, so offline-first survives.
 - Command names chosen to survive later stages: `draft <section> --ai <text>` is the natural home for Stage 4's "Tell the AI".
+- **Preview CSP bug:** the live preview rendered as a blank white pane. It is fed a `blob:` URL into an iframe, and the page CSP said `frame-src 'self'` — CSP matches `'self'` on scheme+host+port, so a `blob:` frame does not match and the browser blocked it silently, with nothing in the server log. Allowed `blob:`, added `object-src 'none'`, and gave the pane a visible `open` link plus a fallback message so a blocked preview can never again be a silent white rectangle.
+
+### Redesign branch
+`design/vintage-layout` holds an in-progress single-page redesign: early-web aesthetic, HOME / DRAFT / NEW RESUME / AI BUILDER nav, left rail, large live preview on the right, CSS/SVG-generated vintage texture. `main` stays on the working terminal design so either can be kept. The command engine, rules, renderers, API and security work are shared and unaffected by the redesign.
 
 ### Bugs found while building Stage 3
 Five real defects, four fatal or silent. Static tests could not have caught them; running `app.js` under node did.
