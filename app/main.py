@@ -12,6 +12,7 @@ worse than no endpoint at all.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from contextlib import asynccontextmanager
@@ -23,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import db, rules
-from .models import Profile, Version
+from .models import Profile, Version, VersionSummary
 from .render import (
     MEDIA_TYPES,
     RENDERERS,
@@ -119,9 +120,29 @@ async def security_and_recursion(request, call_next):
 
 
 @app.get("/", include_in_schema=False)
-def terminal_page() -> FileResponse:
-    """The single-page terminal UI (Stage 3)."""
-    return FileResponse(STATIC_DIR / "index.html")
+def desktop_page() -> Response:
+    """The single-page UI: a Windows 95 desktop.
+
+    The advice in the Read Me window is filled from rules.json rather than from
+    markup typed into index.html, so what the user reads is the cited research
+    in RULES.md rather than a paraphrase. It is injected into a <template>,
+    whose contents are never parsed as HTML and never executed, and "<" is
+    escaped so the JSON cannot terminate the element early. No new route: the
+    route surface stays exactly what Stage 3 built.
+    """
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    payload = json.dumps({"tips": rules.tips()}, separators=(",", ":"))
+    # json.dumps does not escape "<"; do it by hand so no value can close the
+    # template or open a tag.
+    safe = payload.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+    html = html.replace(
+        '{"tips": []}', safe, 1
+    )
+    return Response(
+        content=html,
+        media_type="text/html; charset=utf-8",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -133,11 +154,23 @@ def health() -> dict[str, str]:
 
 
 @app.get("/profile", response_model=Profile)
-def get_profile() -> Profile:
+def get_profile() -> Response:
+    """The stored profile.
+
+    Sent no-store, like every other response that can carry personal details.
+    Exports and previews already were; this one was not, which meant a resume --
+    name, email, phone -- could be left sitting in a disk cache or a shared
+    proxy. Found by sweeping every response for the header instead of assuming
+    the ones we remembered had it.
+    """
     data = db.get_profile(PROFILE_ID)
     if data is None:
         raise HTTPException(status_code=404, detail="no profile yet; PUT /profile first")
-    return Profile.model_validate(data)
+    return Response(
+        content=Profile.model_validate(data).model_dump_json(),
+        media_type="application/json",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.put("/profile", response_model=Profile)
@@ -151,7 +184,53 @@ def put_profile(profile: Profile) -> Profile:
 # Versions and export (Stage 2)
 # --------------------------------------------------------------------------
 
-_SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
+# Filename sanitiser. Spaces are deliberately ALLOWED: the sheets convention is
+# "FirstName LastName Resume", so stripping them would defeat the very rule we
+# are implementing. Everything that could break out of the quoted
+# Content-Disposition header is removed instead.
+_SAFE_NAME = re.compile(r"[^A-Za-z0-9 ._-]+")
+_MULTI_SPACE = re.compile(r"\s+")
+
+
+def _clean_filename(value: str) -> str:
+    cleaned = _MULTI_SPACE.sub(" ", _SAFE_NAME.sub("_", value)).strip(" ._-")
+    return cleaned or "resume"
+
+
+@app.get("/versions", response_model=list[VersionSummary])
+def list_versions(limit: int = Query(100, ge=1, le=500)) -> Response:
+    """Every stored version, newest first.
+
+    This exists because snapshots were write-only: the File Manager was
+    described as a version browser but had nothing to show. Adding an endpoint
+    deliberately breaks the "exactly six routes" test -- six was true when it was
+    written, and "the routes the app needs" is a better property to hold.
+
+    Returns summaries, not `Version`s, so a list of fifty snapshots does not
+    carry fifty complete resumes. Sent no-store like everything else that can
+    hold personal details, because a snapshot's `name` is often a real name.
+    """
+    rows = db.list_versions(limit=limit)
+    return Response(
+        content=json.dumps([VersionSummary.model_validate(row).model_dump(mode="json")
+                            for row in rows]),
+        media_type="application/json",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.delete("/versions/{version_id}", status_code=204)
+def delete_version(version_id: str) -> Response:
+    """Delete one version.
+
+    Snapshots are the user's own history and there is no undo in a database, so
+    this asks first (404 rather than 403 for a row that is not there, and 404 for
+    a row that belongs to nobody else is not expressible here -- there is only
+    ever one user's data in this build).
+    """
+    if not db.delete_version(version_id):
+        raise HTTPException(status_code=404, detail="no such version")
+    return Response(status_code=204)
 
 
 @app.post("/versions", response_model=Version, status_code=201)
@@ -165,7 +244,11 @@ def create_version(version: Version) -> Version:
 
 
 @app.post("/versions/from-profile", response_model=Version, status_code=201)
-def snapshot_current_profile(name: str = "current", include_personal_details: bool = False) -> Version:
+def snapshot_current_profile(
+    name: str = "current",
+    include_personal_details: bool = False,
+    template: str = Query("blank", description="resume template name"),
+) -> Version:
     """Convenience: snapshot whatever is in /profile right now."""
     stored = db.get_profile(PROFILE_ID)
     if stored is None:
@@ -174,6 +257,7 @@ def snapshot_current_profile(name: str = "current", include_personal_details: bo
         name=name,
         profile_snapshot=Profile.model_validate(stored),
         include_personal_details=include_personal_details,
+        template=template,
     )
     return Version.model_validate(db.put_version(version.model_dump(mode="json")))
 
@@ -202,8 +286,12 @@ def export_version(
     version = Version.model_validate(stored)
     doc = build_doc_from_version(version)
 
-    limit = rules.page_limit(doc.level)
-    headers = {"X-Page-Limit": str(limit), "Cache-Control": "no-store"}
+    limit = _page_limit_for(doc, version.template)
+    headers = {
+        "X-Page-Limit": str(limit),
+        "X-Template": rules.template(version.template).get("label", version.template).split(" -")[0],
+        "Cache-Control": "no-store",
+    }
     if fmt == "pdf":
         payload, pages, density = render_pdf_report(doc, max_pages=limit)
         headers["X-Pages"] = str(pages)
@@ -221,7 +309,7 @@ def export_version(
     else:
         payload = RENDERERS[fmt](doc)
 
-    stem = _SAFE_NAME.sub("_", version.name or version_id).strip("._-") or "resume"
+    stem = _export_filename(version, fmt)
     headers["Content-Disposition"] = f'attachment; filename="{stem}.{fmt}"'
     return Response(
         content=payload,
@@ -236,7 +324,10 @@ def export_version(
 
 
 @app.post("/preview")
-def preview_current_profile(profile: Profile) -> Response:
+def preview_current_profile(
+    profile: Profile,
+    template: str = Query("blank", description="resume template name"),
+) -> Response:
     """Render the profile the caller just sent, without storing a version.
 
     Deliberately takes the body rather than reading /profile: the terminal
@@ -245,8 +336,8 @@ def preview_current_profile(profile: Profile) -> Response:
     preview is the real artifact and not an HTML approximation that could
     quietly disagree with the exported file.
     """
-    doc = build_doc(profile)
-    limit = rules.page_limit(doc.level)
+    doc = build_doc(profile, template=template)
+    limit = _page_limit_for(doc, template)
     payload, pages, density = render_pdf_report(doc, max_pages=limit)
     return Response(
         content=payload,
@@ -257,7 +348,38 @@ def preview_current_profile(profile: Profile) -> Response:
             "X-Page-Budget": "over" if pages > limit else "ok",
             "X-Density": density,
             "X-Level": doc.level,
+            "X-Template": template,
             "Cache-Control": "no-store",
             "Content-Disposition": "inline",
         },
     )
+
+
+def _page_limit_for(doc, template: str) -> int:
+    """Page budget for this resume.
+
+    A template may be stricter than the researched default -- the sheets
+    template demands one page even for experienced candidates, per its source.
+    """
+    spec = rules.template(template)
+    return int(spec.get("max_pages") or rules.page_limit(doc.level))
+
+
+def _export_filename(version, fmt: str) -> str:
+    """Filename per the active template's convention.
+
+    The sheets source is emphatic that this must be "FirstName LastName Resume"
+    and never "(Project Management)", "Final" or a year, so that is data in
+    rules.json rather than a name built here.
+    """
+    spec = rules.template(version.template)
+    pattern = spec.get("filename_pattern") or "{name}"
+    parts = [p for p in str(version.name or "").split() if p]
+    if not parts:
+        full = "resume"
+    elif len(parts) == 1:
+        full = parts[0]
+    else:
+        full = f"{parts[0]} {parts[-1]}"
+    rendered = pattern.replace("{name}", full)
+    return _clean_filename(rendered)

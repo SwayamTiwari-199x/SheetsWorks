@@ -14,7 +14,8 @@ modes / structured-output flags are used, so gemini, groq, mistral and
 anthropic all behave identically and only the request/response envelope
 differs:
 
-- gemini, groq, mistral -> one OpenAI-compatible ``/chat/completions`` path.
+- gemini, groq, mistral, openrouter -> one OpenAI-compatible
+  ``/chat/completions`` path.
 - anthropic -> a separate branch (``/messages``).
 
 The reply is then extracted, ``json.loads``-ed, and validated with pydantic.
@@ -215,7 +216,7 @@ def extract_json(text: str) -> str:
 def _post_openai_compat(
     settings: Settings, client: httpx.Client, system: str, user: str
 ) -> str:
-    """gemini / groq / mistral: OpenAI chat-completions dialect."""
+    """gemini / groq / mistral / openrouter: OpenAI chat-completions dialect."""
     resp = _post(
         client,
         f"{settings.base_url}/chat/completions",
@@ -308,6 +309,19 @@ def ask(
             f"unknown provider {settings.llm_provider!r}",
             provider=str(settings.llm_provider),
             model=str(settings.llm_model),
+        )
+
+    # Checked here rather than in config's validator, so Settings still builds
+    # and `--check-llm` can print a sentence instead of a traceback. Only
+    # openrouter has anything to say: its free model ids rotate, so there is no
+    # safe default to fall back on.
+    unmet = settings.model_requirement
+    if unmet:
+        raise LLMError(
+            unmet,
+            provider=settings.llm_provider,
+            model="<unset>",
+            hint="LLM_MODEL is read from .env or the process environment.",
         )
 
     system = f"{SYSTEM_PROMPT}\n\n{schema_prompt(schema)}"

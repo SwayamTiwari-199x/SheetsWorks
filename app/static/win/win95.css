@@ -1,0 +1,807 @@
+/* ============================================================================
+   win95.css -- a Windows 95 design system.
+
+   No framework, no downloads, no web fonts. Everything here is CSS custom
+   properties, box-shadow insets and inline SVG, because that is genuinely all
+   a 3D bevel is.
+
+   THE BEVEL IS THE WHOLE THING
+   Win95's Windows-3.1-derived chrome has almost no animation and no colour
+   beyond grey. All of its character comes from a 2px four-sided bevel: white
+   top-left, dark grey bottom-right, plus an inner highlight and inner shadow.
+   Get those four colours right per edge and everything else looks period
+   correct; get them wrong and no amount of motion will save it.
+
+     raised  light on top-left, dark on bottom-right
+     sunken  the inverse -- fields, list boxes, the status bar
+     pressed a raised bevel, inverted, plus a 1px content shift
+
+   That last one is why the buttons feel right when clicked. The 1px shift is
+   not decoration; it is what the original did.
+
+   Authentic also means: no animation at all, in 1995. The motion in this file
+   is a deliberate, restrained addition, and all of it is disabled under
+   prefers-reduced-motion.
+   ========================================================================= */
+
+:root {
+  /* ---- the sixteen system colours ------------------------------------- */
+  --face:        #c0c0c0;  /* window face, buttons, taskbar            */
+  --hilite:      #ffffff;  /* 3D light          -- top-left outer       */
+  --light:       #dfdfdf;  /* 3D highlight      -- top-left inner       */
+  --shadow:      #808080;  /* 3D shadow         -- bottom-right outer   */
+  --dark:        #000000;  /* 3D dark shadow    -- bottom-right inner   */
+  --teal:        #008080;  /* the desktop                           */
+  --title-a:     #000080;  /* active title bar, gradient start        */
+  --title-b:     #1084d0;  /* active title bar, gradient end          */
+  --title-ia:    #808080;  /* inactive title bar                     */
+  --title-ib:    #b5b5b5;
+  --sel-bg:      #000080;  /* selection                             */
+  --sel-fg:      #ffffff;
+  --sel-bg-off:  #c0c0c0;  /* unfocused selection                   */
+  --sel-fg-off:  #000000;
+  --info-bg:     #ffffe1;  /* message box body                      */
+  --disabled:    #808080;
+  --field-bg:    #ffffff;
+
+  /* ---- metrics -------------------------------------------------------- */
+  --title-h: 18px;
+  --menubar-h: 19px;
+  --status-h: 20px;
+  --taskbar-h: 28px;
+  --ui-size: 11px;
+
+  /* ---- type ----------------------------------------------------------- */
+  /* MS Sans Serif is the real thing and cannot be embedded. Tahoma is a very
+     close metric match and ships with Windows; Geneva and DejaVu cover the
+     rest. No @font-face, because the CSP forbids remote fonts anyway. */
+  --ui: Tahoma, 'MS Sans Serif', Geneva, Verdana, 'DejaVu Sans', sans-serif;
+  /* Fixedsys is the DOS-era bitmap face; Courier New is the honest fallback. */
+  --mono: 'Fixedsys', 'MS Sans Serif', 'DejaVu Sans Mono', 'Courier New', monospace;
+
+  /* ---- the bevels, as reusable shadows -------------------------------- */
+  --bevel-out:
+    inset -1px -1px 0 0 var(--dark),
+    inset  1px  1px 0 0 var(--hilite),
+    inset -2px -2px 0 0 var(--shadow),
+    inset  2px  2px 0 0 var(--light);
+  --bevel-in:
+    inset  1px  1px 0 0 var(--dark),
+    inset -1px -1px 0 0 var(--hilite),
+    inset  2px  2px 0 0 var(--shadow),
+    inset -2px -2px 0 0 var(--light);
+  --bevel-out-thin:
+    inset -1px -1px 0 0 var(--dark),
+    inset  1px  1px 0 0 var(--hilite);
+  --bevel-in-thin:
+    inset  1px  1px 0 0 var(--dark),
+    inset -1px -1px 0 0 var(--hilite);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background: var(--teal);
+  color: #000;
+  font: var(--ui-size) / 1.2 var(--ui);
+  /* Integer sizes only. 1995 had no subpixel layout and fractional pixels
+     make 1px bevels land on half-pixels and go blurry. */
+  -webkit-font-smoothing: none;
+  user-select: none;
+  cursor: default;
+}
+
+/* The busy cursor, as a data URI. Allowed because the page CSP carries
+   img-src 'self' data:. Set on .is-busy, never globally: a permanently busy
+   cursor would be maddening. */
+.is-busy, .is-busy * { cursor: wait !important; }
+
+/* ============================================================ selection === */
+
+::selection { background: var(--sel-bg); color: var(--sel-fg); }
+
+/* ============================================================== bevels === */
+
+.b-out { box-shadow: var(--bevel-out); }
+.b-in  { box-shadow: var(--bevel-in); }
+.b-out-thin { box-shadow: var(--bevel-out-thin); }
+.b-in-thin  { box-shadow: var(--bevel-in-thin); }
+
+/* ============================================================== buttons === */
+
+.btn {
+  appearance: none;
+  min-width: 75px;
+  height: 23px;
+  padding: 3px 12px;
+  background: var(--face);
+  color: #000;
+  border: none;
+  box-shadow: var(--bevel-out);
+  font: inherit;
+  text-align: center;
+  cursor: default;
+  position: relative;
+}
+.btn:active:not(:disabled),
+.btn[aria-pressed="true"] {
+  box-shadow: var(--bevel-in);
+  /* The shift. Everything else about the press is the bevel; this is the rest. */
+  padding: 4px 11px 2px 13px;
+}
+.btn:disabled {
+  color: var(--disabled);
+  text-shadow: 1px 1px 0 var(--hilite);
+}
+.btn:focus-visible { outline: 1px dotted #000; outline-offset: -4px; }
+.btn.default {
+  outline: 1px solid #000;
+  outline-offset: -5px;
+}
+
+/* Small square buttons: the toolbar and the title bar caption buttons. */
+.btn-icon {
+  min-width: 0;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+.btn-icon:active:not(:disabled) { padding: 1px 0 0 1px; }
+
+/* ================================================================ fields === */
+
+.field {
+  background: var(--field-bg);
+  border: none;
+  box-shadow: var(--bevel-in);
+  padding: 3px 4px;
+  height: 21px;
+  font: inherit;
+  color: #000;
+  min-width: 0;
+  user-select: text;
+}
+.field:focus-visible { outline: none; }
+textarea.field { height: auto; resize: none; padding: 4px; line-height: 1.35; }
+
+.field-label {
+  display: block;
+  margin-bottom: 3px;
+}
+
+/* A list box: sunken white, navy selection. */
+.listbox {
+  background: var(--field-bg);
+  box-shadow: var(--bevel-in);
+  overflow-y: auto;
+  user-select: text;
+}
+.listbox-row {
+  padding: 2px 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.listbox-row[aria-selected="true"] {
+  background: var(--sel-bg);
+  color: var(--sel-fg);
+}
+.listbox:not(:focus-within) .listbox-row[aria-selected="true"] {
+  background: var(--sel-bg-off);
+  color: var(--sel-fg-off);
+}
+
+/* A group box: a 1px etched frame with a legend that breaks the top edge. */
+.groupbox {
+  position: relative;
+  margin: 12px 4px 4px;
+  padding: 10px 8px 8px;
+  box-shadow: var(--bevel-in-thin);
+}
+.groupbox > legend,
+.groupbox > .groupbox-legend {
+  position: absolute;
+  top: -7px;
+  left: 7px;
+  padding: 0 4px;
+  background: var(--face);
+}
+
+/* Checkbox and radio: the sunken well plus a glyph. No images needed. */
+.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+}
+.check input { appearance: none; margin: 0; width: 13px; height: 13px;
+  background: var(--field-bg); box-shadow: var(--bevel-in); position: relative;
+  flex: 0 0 auto; cursor: default; }
+.check input:checked::after {
+  content: ""; position: absolute; inset: 2px 2px 3px 2px;
+  /* the tick, as a rotated border */
+  border: solid #000; border-width: 0 2px 2px 0; transform: rotate(40deg);
+}
+.check input:focus-visible { outline: 1px dotted #000; outline-offset: 2px; }
+
+/* =========================================================== scrollbars === */
+/* 1995 scrollbars are 16px wide with arrow buttons at both ends and a
+   checkerboard track. The checkerboard is the detail that sells it. */
+
+.scroll, .win-body, .listbox, .desktop { scrollbar-color: var(--face) var(--hilite); }
+
+::-webkit-scrollbar { width: 16px; height: 16px; }
+::-webkit-scrollbar-corner { background: var(--face); }
+::-webkit-scrollbar-track {
+  background-color: var(--face);
+  background-image:
+    linear-gradient(45deg, var(--hilite) 25%, transparent 25%, transparent 75%, var(--hilite) 75%),
+    linear-gradient(45deg, var(--hilite) 25%, transparent 25%, transparent 75%, var(--hilite) 75%);
+  background-size: 2px 2px;
+  background-position: 0 0, 1px 1px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--face);
+  box-shadow: var(--bevel-out);
+}
+::-webkit-scrollbar-button:single-button {
+  background: var(--face);
+  box-shadow: var(--bevel-out);
+  height: 16px;
+  width: 16px;
+}
+
+/* ============================================================== desktop === */
+
+#desktop {
+  position: absolute;
+  inset: 0 0 var(--taskbar-h) 0;
+  overflow: hidden;
+}
+
+.desk-icon {
+  width: 74px;
+  padding: 4px 2px 5px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+  color: #fff;
+  text-shadow: 1px 1px 0 rgba(0, 0, 0, .65);
+  padding-left: 3px; padding-right: 3px;
+}
+.desk-icon svg { width: 32px; height: 32px; flex: 0 0 auto; }
+.desk-icon[aria-selected="true"] {
+  background: var(--sel-bg);
+  outline: 1px dotted var(--hilite);
+  outline-offset: -1px;
+}
+/* One click selects, a second click on the label opens -- the Win95 idiom. */
+.desk-icon:hover { outline: 1px dotted rgba(255, 255, 255, .5); outline-offset: -1px; }
+
+/* =============================================================== window === */
+
+.win {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  min-height: 90px;
+  background: var(--face);
+  box-shadow: var(--bevel-out);
+  /* Sits above the desktop, below the taskbar and any menu. */
+  z-index: 10;
+}
+/* Active windows get the extra drop shadow, which is how you tell them apart
+   when four of them overlap. */
+.win[data-active="true"] { box-shadow: var(--bevel-out), 2px 2px 6px rgba(0,0,0,.35); }
+.win[data-active="false"] .win-title { background: linear-gradient(90deg, var(--title-ia), var(--title-ib)); }
+
+.win-title {
+  flex: 0 0 auto;
+  height: var(--title-h);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 2px 0 3px;
+  background: linear-gradient(90deg, var(--title-a), var(--title-b));
+  color: #fff;
+  font-weight: bold;
+  overflow: hidden;
+}
+.win-title-text {
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.win-title-icon { width: 16px; height: 16px; flex: 0 0 auto; }
+.win-caption { display: flex; gap: 2px; flex: 0 0 auto; }
+.win-caption .btn-icon { width: 16px; height: 14px; }
+.win-caption svg { display: block; }
+
+/* The [-] [_] [X] glyphs, drawn with borders so there is no sprite sheet. */
+.glyph-min::after   { content: ""; width: 6px; height: 2px; background: #000; margin-top: 6px; }
+.glyph-max::after   { content: ""; width: 9px; height: 8px; border: 1px solid #000; border-top-width: 2px; }
+.glyph-close        { position: relative; }
+.glyph-close::before, .glyph-close::after {
+  content: ""; position: absolute; left: 3px; top: 2px;
+  width: 9px; height: 2px; background: #000;
+}
+.glyph-close::before { transform: rotate(45deg); }
+.glyph-close::after  { transform: rotate(-45deg); }
+
+.win-menubar {
+  flex: 0 0 auto;
+  display: flex;
+  height: var(--menubar-h);
+  padding: 1px 0 0 1px;
+  align-items: stretch;
+}
+.win-menu {
+  padding: 3px 7px 4px;
+  cursor: default;
+  position: relative;
+}
+.win-menu:hover, .win-menu[aria-expanded="true"] {
+  background: var(--sel-bg);
+  color: var(--sel-fg);
+}
+/* Underlined first letter, as in Alt+F for File. */
+.win-menu u { text-decoration: underline; }
+
+.win-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 3px;
+  box-shadow: var(--bevel-out-thin);
+  margin: 0 2px 2px;
+}
+.win-toolbar .sep {
+  width: 0; align-self: stretch; margin: 1px 3px;
+  box-shadow: inset 1px 0 0 var(--shadow), inset 2px 0 0 var(--hilite);
+}
+
+.win-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0 2px;
+  overflow: auto;
+  padding: 6px;
+  position: relative;
+  /* A column, so a window can hold scrolling content AND a fixed button bar
+     underneath it. With height:100% on the content instead, the buttons were
+     pushed clean out of a fixed-height dialog and simply did not appear. */
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* The scrolling region. Everything that wants the remaining space asks for it
+   here rather than with height:100%. */
+.win-body > .well-fill { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.win-body > .split     { flex: 1 1 auto; }
+.win-body > iframe     { flex: 1 1 auto; min-height: 0; width: 100%; border: none; background: #fff; }
+/* A dialog's button bar is a sibling, not a flex child that grows. */
+.win-body > .msg-buttons { flex: 0 0 auto; }
+.win-body > .groupbox    { flex: 0 0 auto; }
+
+.win-statusbar {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 2px;
+  height: var(--status-h);
+  padding: 2px;
+  align-items: stretch;
+}
+.win-status-cell {
+  padding: 2px 5px;
+  box-shadow: var(--bevel-in-thin);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 0 1 auto;
+}
+.win-status-cell.grow { flex: 1 1 auto; }
+/* The little diagonal grip in the corner of a status bar. */
+.win-status-grip {
+  flex: 0 0 auto; width: 14px;
+  background-image:
+    linear-gradient(135deg, transparent 0 42%, var(--hilite) 42% 50%, transparent 50% 100%),
+    linear-gradient(135deg, transparent 0 62%, var(--hilite) 62% 70%, transparent 70% 100%);
+}
+
+.win-resizer {
+  position: absolute;
+  right: 0; bottom: 0;
+  width: 14px; height: 14px;
+  cursor: nwse-resize;
+  z-index: 2;
+}
+
+/* ============================================================== dialogs === */
+
+.win.dialog { border: none; }
+.win.dialog .win-title { height: 18px; }
+.win.dialog .win-body { padding: 10px; }
+
+.msg-row { display: flex; gap: 12px; align-items: flex-start; }
+.msg-icon { flex: 0 0 auto; width: 32px; height: 32px; }
+.msg-text { flex: 1 1 auto; max-width: 46ch; line-height: 1.45; }
+.msg-text .title { font-weight: bold; display: block; margin-bottom: 4px; }
+.msg-buttons {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+.msg-buttons .btn { min-width: 84px; }
+
+/* Modal veil: Win95 grayed the owner window rather than dimming the screen. */
+#veil {
+  position: absolute;
+  inset: 0 0 var(--taskbar-h) 0;
+  background: rgba(0, 0, 0, .18);
+  /* Below a modal dialog (see Z_VEIL in shell.js). Above it, a dialog is
+     visible but unclickable and the whole desktop appears frozen. */
+  z-index: 900;
+  display: none;
+}
+#veil.on { display: block; }
+
+/* ============================================================= menus === */
+
+.menu-popup {
+  position: absolute;
+  min-width: 140px;
+  background: var(--face);
+  box-shadow: var(--bevel-out);
+  padding: 2px;
+  z-index: 1050;
+}
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 16px 4px 8px;
+  position: relative;
+  white-space: nowrap;
+}
+.menu-item:hover:not([aria-disabled="true"]) { background: var(--sel-bg); color: var(--sel-fg); }
+.menu-item[aria-disabled="true"] { color: var(--disabled); text-shadow: 1px 1px 0 var(--hilite); }
+.menu-item .accel { margin-left: auto; opacity: .8; }
+.menu-item .check-mark { position: absolute; left: 3px; }
+.menu-sep { height: 0; margin: 3px 2px; box-shadow: inset 0 1px 0 var(--shadow), inset 0 2px 0 var(--hilite); }
+
+/* ============================================================= taskbar === */
+
+#taskbar {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: var(--taskbar-h);
+  background: var(--face);
+  box-shadow: var(--bevel-out-thin), inset 0 1px 0 0 var(--hilite);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 2px 2px 2px;
+  z-index: 1100;
+}
+#startBtn {
+  height: 22px;
+  padding: 2px 6px 3px 4px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+#startBtn svg { width: 16px; height: 16px; }
+#taskButtons { display: flex; gap: 2px; flex: 1 1 auto; min-width: 0; overflow: hidden; }
+.task-btn {
+  flex: 0 1 160px;
+  min-width: 40px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  font: inherit;
+  background: var(--face);
+  border: none;
+  box-shadow: var(--bevel-out);
+  text-align: left;
+  overflow: hidden;
+  cursor: default;
+}
+.task-btn:active, .task-btn[data-active="true"] { box-shadow: var(--bevel-in); padding: 3px 5px 1px 7px; }
+.task-btn span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task-btn svg { width: 14px; height: 14px; flex: 0 0 auto; }
+#tray {
+  flex: 0 0 auto;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 5px;
+  box-shadow: var(--bevel-in-thin);
+  font: inherit;
+  cursor: default;
+}
+#tray svg { width: 14px; height: 14px; }
+#tray[aria-pressed="true"] { color: #000080; }
+
+/* The classic Start menu: a vertical strip on the left, items on the right. */
+#startMenu {
+  position: absolute;
+  left: 2px;
+  bottom: var(--taskbar-h);
+  width: 190px;
+  background: var(--face);
+  box-shadow: var(--bevel-out);
+  padding: 2px;
+  z-index: 1100;
+  display: none;
+}
+#startMenu.open { display: block; }
+.start-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  cursor: default;
+}
+.start-item:hover, .start-item:focus-visible { background: var(--sel-bg); color: var(--sel-fg); outline: none; }
+.start-item svg { width: 22px; height: 22px; flex: 0 0 auto; }
+.start-item[aria-disabled="true"] { color: var(--disabled); text-shadow: 1px 1px 0 var(--hilite); }
+.start-item[aria-disabled="true"]:hover { background: none; color: var(--disabled); }
+.start-sep { height: 0; margin: 3px 2px; box-shadow: inset 0 1px 0 var(--shadow), inset 0 2px 0 var(--hilite); }
+
+/* ============================================================ progress === */
+
+/* Win95's progress bar was a solid block; the segmentation reads as a later
+   Windows but is far more legible while something is happening. */
+.bar {
+  height: 18px;
+  background: var(--face);
+  box-shadow: var(--bevel-in);
+  padding: 2px;
+  overflow: hidden;
+}
+.bar-fill {
+  height: 100%;
+  width: 0;
+  background: var(--sel-bg);
+  background-image: repeating-linear-gradient(
+    90deg, var(--sel-bg) 0 8px, rgba(255,255,255,.25) 8px 10px);
+  transition: width .12s linear;
+}
+/* Indeterminate: the block slides, which is the period-correct "I have no
+   idea how long this will take" signal. */
+.bar.indeterminate .bar-fill {
+  width: 34%;
+  animation: barslide 1.1s linear infinite;
+}
+@keyframes barslide {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(330%); }
+}
+
+/* The status bar marquee. dir=rtl plus a static block is how you get text
+   scrolling the correct way without a marquee element, which is deprecated. */
+.marquee {
+  display: inline-block;
+  white-space: nowrap;
+  padding-left: 100%;
+  animation: marquee 14s linear infinite;
+}
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-100%); }
+}
+
+/* ============================================================== motion === */
+/* All of this is an addition. 1995 had none of it. Kept short, kept few, and
+   switched off wholesale for reduced-motion. */
+
+@keyframes win-open {
+  from { opacity: 0; transform: scale(.965) translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes win-close {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: scale(.97); }
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+.win.opening { animation: win-open 110ms ease-out; }
+.win.closing { animation: win-close 70ms ease-in forwards; }
+
+@media (prefers-reduced-motion: reduce) {
+  .win.opening, .win.closing { animation: none; }
+  .bar-fill, .bar.indeterminate .bar-fill { transition: none; animation: none; }
+  .marquee { animation: none; padding-left: 0; }
+  *, *::before, *::after { transition-duration: 0s !important; }
+}
+
+/* While a window is being dragged, suppress text selection and the cursor so
+   the pointer does not flicker between the title and the text under it. */
+body.dragging, body.dragging * { user-select: none; cursor: default !important; }
+body.resizing, body.resizing * { user-select: none; }
+
+/* ============================================================== editor === */
+
+/* The form inside My Resume: a section list on the left, fields on the right, a
+   button bar along the bottom. Whole pixels throughout, because a 1px bevel on
+   a fractional boundary goes blurry. */
+
+.ed-split { flex: 1 1 auto; min-height: 0; gap: 6px; }
+
+.ed-sections { flex: 0 0 190px; width: 190px; overflow-y: auto; }
+
+/* A section the active template will not print. Marked, not hidden -- hiding it
+   would read as data loss. */
+.ed-sections .listbox-row[data-hidden="true"]::after {
+  content: "  (not printed)";
+  color: var(--disabled);
+  font-size: 9px;
+}
+
+.ed-fields {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+}
+
+.ed-blurb { margin: 0 0 10px; color: var(--dim); font-size: 11px; line-height: 1.45; }
+
+.ed-field {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.ed-label { font-size: 11px; color: var(--ink); }
+.ed-input { width: 100%; }
+/* A textarea needs the full width and its label above it, not beside it. */
+.ed-field:has(textarea) { grid-template-columns: 1fr; }
+.ed-field:has(textarea) .ed-label { margin-bottom: 3px; }
+textarea.ed-input { height: 64px; }
+
+.ed-entries { display: flex; gap: 6px; margin-bottom: 10px; min-height: 78px; }
+.ed-picker { flex: 1 1 auto; min-width: 0; overflow-y: auto; max-height: 78px; }
+.ed-tools { flex: 0 0 66px; display: flex; flex-direction: column; gap: 3px; }
+.ed-tools .btn { min-width: 0; height: 18px; padding: 0 4px; font-size: 10px; }
+.ed-tools .btn:active { padding: 1px 3px 0 5px; }
+
+.ed-bullet { display: flex; align-items: baseline; gap: 6px; padding: 2px 0; font-size: 11px; }
+.ed-bullet-n { color: var(--dim); flex: 0 0 auto; }
+.ed-bullet-t { flex: 1 1 auto; overflow-wrap: anywhere; }
+.ed-bullet .btn-icon { width: 16px; height: 16px; flex: 0 0 auto; font-size: 9px; }
+
+.ed-sub { font-size: 11px; color: var(--dim); margin: 4px 0; overflow-wrap: anywhere; }
+
+.btn.ed-wide { width: 100%; margin-bottom: 6px; }
+
+.ed-bar {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding-top: 6px;
+  box-shadow: inset 0 1px 0 var(--shadow), inset 0 2px 0 var(--hilite);
+}
+.ed-count { font-size: 10px; color: var(--dim); text-align: right; }
+
+/* ============================================== file manager / export ==== */
+
+/* Tabs, the Win95 way: raised, and the selected one merged into the pane below
+   it by pulling its own border away. Not a real tab widget -- no arrow keys --
+   which is why each is a <button> with role="tab". */
+.fm-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 3px 3px 0;
+  flex: 0 0 auto;
+}
+.fm-tabs .tab {
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 12px 4px;
+  background: var(--face);
+  color: var(--ink);
+  border: none;
+  /* outset bevel, minus the bottom edge */
+  box-shadow: inset 1px 1px 0 var(--hilite),
+              inset -1px 0 0 var(--shadow),
+              inset 0 -1px 0 var(--shadow);
+  position: relative;
+  top: 1px;
+  cursor: default;
+}
+.fm-tabs .tab.active {
+  font-weight: bold;
+  padding: 4px 14px 5px;
+  top: 0;
+  box-shadow: inset 1px 1px 0 var(--hilite),
+              inset -1px 0 0 var(--shadow);
+}
+.fm-tabs .tab:active { /* a tab is not a button; it does not press in */ }
+
+.fm-split { flex: 1 1 auto; min-height: 0; gap: 4px; }
+.fm-left { flex: 0 0 190px; width: 190px; overflow-y: auto; }
+
+.fm-key { color: var(--dim); flex: 0 0 auto; }
+.fm-val { overflow-wrap: anywhere; }
+
+.fm-actions {
+  display: flex;
+  gap: 6px;
+  padding: 8px 4px 4px;
+}
+
+/* ---- Export dialog ---- */
+.ed-formats { height: 92px; margin-bottom: 10px; }
+.ed-check {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  align-items: start;
+  gap: 3px 6px;
+  font-size: 11px;
+  padding: 2px 0 4px;
+  cursor: default;
+}
+.ed-check input { margin: 1px 0 0; }
+.ed-check .ed-hint {
+  grid-column: 2;
+  color: var(--dim);
+  font-size: 10px;
+  line-height: 1.4;
+}
+.ed-name { font-size: 11px; padding: 6px 2px 2px; }
+.ed-name .fm-val { font-family: Fixedsys, "Courier New", monospace; }
+
+/* =========================================================== utilities === */
+
+.nowrap { white-space: nowrap; }
+.grow { flex: 1 1 auto; min-width: 0; min-height: 0; }
+.row { display: flex; gap: 8px; align-items: flex-end; }
+
+/* A side-by-side split that FILLS its container -- the File Manager's folder
+   tree beside its file list. Deliberately not the .row utility above: that one
+   bottom-aligns its children for form fields, and reusing it here left both
+   list boxes collapsed to a single 17px row. Caught by measuring the real
+   layout; it looked fine in the source. */
+.split {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+  min-height: 0;
+}
+.split > .listbox { height: 100%; }
+.stack { display: flex; flex-direction: column; gap: 8px; }
+.right { margin-left: auto; }
+.mono { font-family: var(--mono); }
+.dim { color: var(--disabled); }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+:focus-visible { outline: 1px dotted #000; outline-offset: -4px; }

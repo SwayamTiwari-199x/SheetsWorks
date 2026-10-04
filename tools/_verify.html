@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI verification harness</title>
+<link rel="stylesheet" href="/static/win/win95.css">
+</head>
+<!-- Not app code, and deliberately not an iframe.
+
+   The first version of this harness loaded the real page in an iframe and
+   reached into it. Under `chromium --dump-dom --virtual-time-budget` the
+   iframe's load event never fired, so every check silently did nothing and the
+   empty log looked exactly like a clean run. Running the same scripts in the
+   top document removes the whole class of problem: same code, same origin, no
+   cross-document timing to get wrong.
+
+   It loads the app's own stylesheet and scripts and then inspects the result,
+   so what it checks is the real desktop, not a stand-in. -->
+<body>
+
+<div id="desktop"><div id="desktopIcons"></div></div>
+<div id="veil"></div>
+<div id="taskbar">
+  <button type="button" id="startBtn" class="btn" aria-haspopup="true" aria-expanded="false">
+    <span id="startIcon" aria-hidden="true"></span>Start
+  </button>
+  <div id="taskButtons"></div>
+  <div id="tray" role="status" title="Sound">
+    <span id="trayIcon" aria-hidden="true"></span>
+    <span id="trayText"></span>
+  </div>
+</div>
+<nav id="startMenu" role="menu" aria-label="Start menu"></nav>
+<template id="tipsData">{"tips": []}</template>
+
+<script src="/static/win/shell.js"></script>
+<script src="/static/win/sample.js"></script>
+<script src="/static/win/editor-model.js"></script>
+<script src="/static/win/editor.js"></script>
+<script src="/static/_probe.js"></script>
+<script src="/static/win/app.js"></script>
+<script src="/static/_verify.js"></script>
+</body>
+</html>

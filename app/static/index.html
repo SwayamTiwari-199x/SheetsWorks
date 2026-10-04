@@ -1,58 +1,52 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="amber">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>resume-builder — bash</title>
-<link rel="stylesheet" href="/static/term.css">
+<title>Sheetsworks</title>
+<link rel="stylesheet" href="/static/win/win95.css">
 </head>
 <body>
 
-<!-- Navbar: styled as a terminal title bar. Every item TYPES a command into the
-     terminal and runs it, so the terminal stays the single source of truth and
-     the navbar is only a shortcut surface. -->
-<nav id="navbar" aria-label="Section shortcuts">
-  <span class="nb-title">~/resume-builder — bash</span>
-  <span class="nb-items" id="nbItems"></span>
-  <span class="nb-status" id="nbStatus" role="status" aria-live="polite">connecting…</span>
-</nav>
+<!-- The desktop. Windows live here; the taskbar is outside it so it is never
+     covered, which is exactly why Windows put it there. -->
+<div id="desktop">
+  <div id="desktopIcons"></div>
+</div>
 
-<main id="screen">
-  <div id="scrollback" role="log" aria-live="polite" aria-label="Terminal output"></div>
+<!-- A modal dialog dims the desktop, as Windows grayed the owner window. -->
+<div id="veil"></div>
 
-  <form id="promptForm" autocomplete="off">
-    <label for="cmd" id="promptLabel" class="prompt-label">resume-builder</label>
-    <span class="prompt-path" id="promptPath">~</span>
-    <span class="prompt-sigil">$</span>
-    <input id="cmd" name="cmd" type="text" spellcheck="false" autocapitalize="off"
-           autocorrect="off" aria-describedby="promptLabel">
-  </form>
-</main>
-
-<!-- Live preview: the real exported PDF, not an approximation. -->
-<section id="previewPane" hidden aria-label="Live resume preview">
-  <div id="previewBar">
-    <span id="previewTitle">preview.pdf</span>
-    <span id="previewMeta"></span>
-    <a id="previewOpen" href="#" target="_blank" rel="noopener">open</a>
-    <button id="previewRefresh" type="button" title="Refresh preview (Ctrl+P also toggles)">refresh</button>
-    <button id="previewClose" type="button" title="Close preview">close</button>
+<div id="taskbar">
+  <button type="button" id="startBtn" class="btn" aria-haspopup="true" aria-expanded="false">
+    <span id="startIcon" aria-hidden="true"></span>Start
+  </button>
+  <div id="taskButtons"></div>
+  <div id="tray" role="status" title="Sound">
+    <span id="trayIcon" aria-hidden="true"></span>
+    <span id="trayText"></span>
   </div>
-  <iframe id="previewFrame" title="Rendered resume PDF"></iframe>
-  <!-- Shown if the frame cannot render, so a blocked preview is never a silent
-       white box again. -->
-  <div id="previewFallback" hidden>
-    <p>The preview could not be shown in place.</p>
-    <p class="dim">Use <strong>open</strong> above, or <strong>export pdf</strong>.</p>
-  </div>
-</section>
+</div>
+
+<nav id="startMenu" role="menu" aria-label="Start menu"></nav>
+
+<!-- Injected by the server from rules.json. A <template> is inert: its contents
+     are never parsed as HTML and never executed, so the JSON cannot become
+     markup even if it contained a tag. "<" is escaped below for the same
+     reason. This keeps the advice on screen the researched advice rather than
+     a paraphrase typed into the markup. -->
+<template id="tipsData">{"tips": []}</template>
 
 <noscript>
-  <p class="noscript">This terminal needs JavaScript. The API still works without it:
-  <code>PUT /profile</code>, <code>POST /export/{'{version_id}'}</code>.</p>
+  <div class="noscript">This program needs JavaScript. The API still works without it:
+  <code>PUT /profile</code>, <code>POST /export/{version_id}</code>.</div>
 </noscript>
 
-<script src="/static/app.js"></script>
+<script src="/static/win/shell.js"></script>
+<script src="/static/win/sample.js"></script>
+<script src="/static/win/editor-model.js"></script>
+<script src="/static/win/editor.js"></script>
+<script src="/static/win/app.js"></script>
 </body>
 </html>

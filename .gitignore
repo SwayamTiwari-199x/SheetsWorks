@@ -9,7 +9,10 @@
 *.db-shm
 logs/
 
-# manual inspection output (sample renders)
+# Generated output only: screenshots, logs, rendered samples.
+# The verification harnesses that PRODUCE these live in tools/ and are tracked --
+# they are what caught the preview overlay, the clipped export dialog and the
+# raise-on-click bug, so they belong in the repository, not in a scratch folder.
 out/
 exports/
 

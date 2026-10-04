@@ -10,7 +10,21 @@ import pytest
 # Point at a throwaway DB before app.config is imported anywhere.
 os.environ["DATABASE_URL"] = "sqlite:///./test_resume.db"
 os.environ["LOG_DIR"] = "logs"
-for var in ("ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY"):
+
+# Scrubbed before anything imports app.config. pydantic-settings reads the
+# process environment when Settings() is constructed rather than at import, so
+# this is belt-and-braces -- but the list was hardcoded and a provider added to
+# API_KEY_VARS was NOT added here, which leaked a real key into test output and
+# into an assertion message. It is checked against API_KEY_VARS by
+# test_every_provider_key_is_scrubbed so it cannot drift again.
+_PRE_IMPORT_SCRUB = (
+    "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY",
+    "GROQ_API_KEY",
+    "MISTRAL_API_KEY",
+    "OPENROUTER_API_KEY",
+)
+for var in _PRE_IMPORT_SCRUB:
     os.environ.pop(var, None)
 
 from app import config, db  # noqa: E402
@@ -19,24 +33,37 @@ from app.models import Profile  # noqa: E402
 # Anything the developer's real environment might set. pydantic-settings always
 # reads the process environment and `_env_file=None` does NOT disable that, so
 # these must be cleared explicitly or tests become machine-dependent.
+#
+# The key vars come from API_KEY_VARS rather than being spelled out again. They
+# were listed twice in this one file and a new provider had to be added to both
+# by hand; one list missed it and a real OpenRouter key leaked into a test
+# failure message.
 _LLM_ENV_VARS = [
     "LLM_PROVIDER",
     "LLM_MODEL",
     "LLM_TIMEOUT_SECONDS",
     "LLM_MAX_TOKENS",
     "LLM_TEMPERATURE",
-    "ANTHROPIC_API_KEY",
-    "GEMINI_API_KEY",
-    "GROQ_API_KEY",
-    "MISTRAL_API_KEY",
-]
+] + list(config.API_KEY_VARS.values())
+
+
+def scrub_llm_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remove every ambient LLM variable, including all provider API keys.
+
+    A plain function rather than fixture body code, because a test has to be able
+    to call this and prove it works. pytest refuses direct fixture calls, and
+    "the list looks right" is not evidence -- a real OpenRouter key was read by
+    the suite and printed in an assertion message because openrouter had been
+    added to API_KEY_VARS and not to this list.
+    """
+    for var in _LLM_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
 
 
 @pytest.fixture(autouse=True)
 def isolated_llm_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Guarantee no test sees the real .env or an ambient LLM_* variable."""
-    for var in _LLM_ENV_VARS:
-        monkeypatch.delenv(var, raising=False)
+    scrub_llm_env(monkeypatch)
     config.get_settings.cache_clear()
     yield
     config.get_settings.cache_clear()
