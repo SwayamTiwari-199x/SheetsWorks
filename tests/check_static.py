@@ -22,11 +22,10 @@ MODEL = (STATIC / "win" / "editor-model.js").read_text(encoding="utf-8")
 SAMPLE = (STATIC / "win" / "sample.js").read_text(encoding="utf-8")
 CSS = (STATIC / "win" / "win95.css").read_text(encoding="utf-8")
 HTML = (STATIC / "index.html").read_text(encoding="utf-8")
-OLD_JS = (STATIC / "win" / "old-app.js").read_text(encoding="utf-8")
-OLD_CSS = (STATIC / "win" / "old-term.css").read_text(encoding="utf-8")
-OLD_HTML = (STATIC / "win" / "terminal.html").read_text(encoding="utf-8")
 
-# Everything that ships as the new front end.
+# Everything that ships as the front end. That is all of it now: the archived
+# terminal (terminal.html, old-app.js, old-term.css, old-site.css) has been
+# deleted, so there is no longer a second page whose assets need resolving.
 NEW_JS = (SHELL, APP, EDITOR, MODEL, SAMPLE)
 
 failures = []
@@ -63,18 +62,11 @@ for ref in re.findall(r'src="(/static/[^"]+)"', HTML):
 for ref in re.findall(r'href="(/static/[^"]+)"', HTML):
     check((STATIC / ref[len("/static/"):]).exists(), f"{ref} does not exist")
 
-# --- the archived terminal must still resolve its own assets -------------
-
-for ref in re.findall(r'(?:href|src)="(/static/[^"]+)"', OLD_HTML):
-    check((STATIC / ref[len("/static/"):]).exists(),
-          f"terminal.html references {ref}, which does not exist")
-
 # --- nothing loads from the network ---------------------------------------
 
-for name, css in (("win95.css", CSS), ("old-term.css", OLD_CSS)):
-    for banned in ("@import", "fonts.googleapis", "cdn.", "http://",
-                   "https://", "url("):
-        check(banned not in css, f"{name} reaches outside via {banned}")
+for banned in ("@import", "fonts.googleapis", "cdn.", "http://",
+               "https://", "url("):
+    check(banned not in CSS, f"win95.css reaches outside via {banned}")
 
 check("@font-face" not in re.sub(r"/\*.*?\*/", "", CSS, flags=re.DOTALL),
       "no font may be embedded")

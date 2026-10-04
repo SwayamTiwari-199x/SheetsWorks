@@ -335,6 +335,127 @@ const FM_TABS = [['resume', 'Resume'], ['versions', 'Versions']];
 let fmMode = 'resume';
 let fmVersions = null;
 
+/* --- profile JSON download / upload ------------------------------------ */
+/* The minimum Stage 3 asked for and never got. Both directions are thin on
+   purpose: GET /profile already returns exactly the file, and PUT /profile
+   already validates it, so the server needs nothing new and there is no way for
+   the two sides to disagree about the format. */
+
+/* Shared by the JSON download and the PDF/DOCX/TXT export, so there is one place
+   that hands a blob to the browser and one revoke policy. */
+function triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  // Revoke late: Safari and Firefox have been known to cancel the download if the
+  // URL disappears in the same tick as the click.
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
+function profileJsonFilename() {
+  const n = state.profile && state.profile.contact && state.profile.contact.name;
+  return (n ? n : 'profile').trim() + '.json';
+}
+
+async function downloadProfileJson() {
+  try {
+    const res = await api('/profile');
+    if (res.status === 404) {
+      await W.messageBox({
+        title: 'Download Profile', icon: 'warning',
+        heading: 'Nothing to download',
+        message: 'There is no saved profile yet. Fill in My Resume and save it first.',
+        buttons: ['OK'],
+      });
+      return;
+    }
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const blob = await res.blob();
+    const filename = profileJsonFilename();
+    triggerDownload(blob, filename);
+    W.setStatus('fm', 'Saved ' + filename + ' (' + blob.size + ' bytes)', 'right');
+  } catch (err) {
+    W.sfx.error();
+    W.setStatus('fm', 'Download failed: ' + err.message, 'right');
+  }
+}
+
+/* Upload. Read and parsed in the browser, confirmed with the user, and only then
+   sent -- asking permission after the write would be theatre.
+
+   A malformed profile comes back as a 422 from the same validator that guards
+   every other write, and the server's own text is shown: "name: field required"
+   is the difference between a message the user can act on and "upload failed". */
+function uploadProfileJson() {
+  const picker = document.createElement('input');
+  picker.type = 'file';
+  picker.accept = 'application/json,.json';
+  picker.addEventListener('change', async () => {
+    const file = picker.files && picker.files[0];
+    if (!file) return;
+    let parsed;
+    try {
+      parsed = JSON.parse(await file.text());
+    } catch (err) {
+      W.sfx.error();
+      await W.messageBox({
+        title: 'Upload Profile', icon: 'error',
+        heading: 'That file is not valid JSON',
+        message: String(err.message),
+        buttons: ['OK'],
+      });
+      return;
+    }
+    const answer = await W.messageBox({
+      title: 'Upload Profile', icon: 'warning',
+      heading: 'Replace the saved profile?',
+      message: 'File: ' + file.name + '\n\nThis overwrites the profile in full. '
+        + 'Nothing is merged, and nothing is kept.',
+      buttons: ['Replace', 'Cancel'],
+    });
+    if (answer !== 'Replace') {
+      W.setStatus('fm', 'Upload cancelled', 'right');
+      return;
+    }
+    try {
+      const res = await api('/profile', { method: 'PUT', body: parsed });
+      if (!res.ok) throw new Error(await explainFailure(res));
+      await reloadProfile();
+      W.setStatus('fm', 'Uploaded ' + file.name, 'right');
+    } catch (err) {
+      W.sfx.error();
+      await W.messageBox({
+        title: 'Upload Profile', icon: 'error',
+        heading: 'The server rejected that profile',
+        message: String(err.message),
+        buttons: ['OK'],
+      });
+      W.setStatus('fm', 'Upload failed', 'right');
+    }
+  });
+  // A file input is only clickable while it is in the document.
+  document.body.appendChild(picker);
+  picker.click();
+  document.body.removeChild(picker);
+}
+
+/* Pull the profile back from the server and hand it to whoever is showing it. One
+   function because there are two callers -- boot and this upload -- and they must
+   not drift. */
+async function reloadProfile() {
+  const res = await api('/profile');
+  state.profile = await res.json();
+  window.EditorForm.refresh(state.profile);
+  W.setStatus('editor', 'Ready', 'right');
+  const fm = W.windows.get('fm');
+  if (fm) paintFm(fm);
+  refreshPreviewSoon();
+}
+
 function openFileManager() {
   return once('fm', () => {
     const rec = W.createWindow({
@@ -344,6 +465,13 @@ function openFileManager() {
         { label: 'File', items: [
           { label: 'Open', accel: 'Enter', action: () => openEditor() },
           { label: 'Export As...', accel: 'Ctrl+E', action: () => openExport() },
+          { sep: true },
+          // BUILD_PLAN Stage 3 asks for "a profile JSON download/upload" beside
+          // the PDF/DOCX/TXT export buttons. It was missing. No new route: the
+          // file is GET /profile as it stands, and the upload is PUT /profile,
+          // so this is the browser half of two endpoints that already exist.
+          { label: 'Download Profile JSON', action: () => downloadProfileJson() },
+          { label: 'Upload Profile JSON...', action: () => uploadProfileJson() },
           { sep: true },
           { label: 'Close', accel: 'Alt+F4', action: () => W.close('fm') },
         ] },
@@ -716,6 +844,25 @@ function filenameFromResponse(res, fallback) {
   return plain ? plain[1] : fallback;
 }
 
+/* Turn a failed response into something worth reading. FastAPI's `detail` is a
+   list of per-field objects for validation failures, which rendered as
+   "[object Object]" before this existed -- so the one message that would have
+   told the user which field is wrong was the one message nobody could read. */
+async function explainFailure(res) {
+  let body = null;
+  try { body = await res.json(); } catch (_) { /* not json */ }
+  if (!body) return 'HTTP ' + res.status;
+  const detail = body.detail;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail.map(function (d) {
+      const where = Array.isArray(d.loc) ? d.loc.slice(1).join('.') : '';
+      return (where ? where + ': ' : '') + (d.msg || JSON.stringify(d));
+    }).join('\n');
+  }
+  return 'HTTP ' + res.status;
+}
+
 async function doExport({ versionId, versionName, fmt, personal }) {
   let id = versionId;
   if (!id) {
@@ -733,22 +880,11 @@ async function doExport({ versionId, versionName, fmt, personal }) {
     + encodeURIComponent(fmt), { method: 'POST' });
   if (!res.ok) {
     // The server's own error text, which says which rule was broken.
-    let detail = 'HTTP ' + res.status;
-    try { const j = await res.json(); detail = j.detail || detail; } catch (_) { /* not json */ }
-    throw new Error(detail);
+    throw new Error(await explainFailure(res));
   }
   const blob = await res.blob();
   const filename = filenameFromResponse(res, suggestedName() + '.' + fmt);
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  // Revoke late: Safari and Firefox have been known to cancel the download if
-  // the URL disappears in the same tick as the click.
-  setTimeout(() => URL.revokeObjectURL(url), 30000);
+  triggerDownload(blob, filename);
   W.setStatus('fm', 'Exported ' + filename + ' (' + blob.size + ' bytes)', 'right');
   fmVersions = null;                    // a fresh version now exists
   const rec = W.windows.get('fm');
@@ -1100,11 +1236,12 @@ async function bootInner() {
   const rec = openEditor();
   W.setStatus('editor', 'Loading profile...', 'right');
 
+  // reloadProfile, not a second copy of it: the JSON upload path loads the
+  // profile the same way, and two copies of "assign it, tell the form, tell the
+  // File Manager" is how the File Manager ends up showing yesterday's sections
+  // after an upload.
   try {
-    const res = await api('/profile');
-    state.profile = await res.json();
-    W.setStatus('editor', 'Ready', 'right');
-    window.EditorForm.refresh(state.profile);
+    await reloadProfile();
   } catch (err) {
     state.profile = null;
     W.setStatus('editor', 'No profile saved yet - this is a fresh start', 'right');
@@ -1165,6 +1302,7 @@ window.Sheetsworks = {
   openEditor, openFileManager, openReadMe, openPreview, openDisplay,
   openAbout, openAiNotice, confirmExit, loadSample,
   openExport, setFmMode, loadVersions,
+  downloadProfileJson, uploadProfileJson, reloadProfile,
   ready,
 };
 

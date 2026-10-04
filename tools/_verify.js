@@ -679,6 +679,58 @@ async function run() {
          'headless has no PDF viewer; the DOM and status bar were checked instead');
     }
 
+    /* ---------------- profile JSON download / upload ---------------- */
+    // BUILD_PLAN Stage 3 asks for "a profile JSON download/upload" beside the
+    // PDF/DOCX/TXT export, and it was missing. Driven here rather than read from
+    // source: the interesting failure is a menu item that exists and does
+    // nothing.
+    ok('the app exposes a JSON download', typeof S.downloadProfileJson === 'function');
+    ok('and a JSON upload', typeof S.uploadProfileJson === 'function');
+
+    // The round trip: what GET /profile returns must PUT back unchanged.
+    const downloaded = await (await fetch('/profile')).json();
+    ok('GET /profile is a complete profile object',
+       !!(downloaded.contact && downloaded.experience && downloaded.skills));
+    const putBack = await fetch('/profile', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(downloaded),
+    });
+    ok('it PUTs back unchanged', putBack.ok, 'HTTP ' + putBack.status);
+
+    // A malformed one must be refused with a message naming the field -- that is
+    // what the upload path shows the user instead of "upload failed".
+    const bad = await fetch('/profile', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contact: { name: 'X', email: 'nope', phone: '1' } }),
+    });
+    ok('a malformed profile is refused', bad.status === 422, 'HTTP ' + bad.status);
+    const badBody = await bad.json();
+    ok('and the refusal names the field',
+       Array.isArray(badBody.detail)
+       && badBody.detail.some(function (d) {
+         return Array.isArray(d.loc) && d.loc.join('.').indexOf('email') !== -1;
+       }),
+       JSON.stringify(badBody.detail).slice(0, 160));
+
+    // reloadProfile must repaint the File Manager as well as the editor. That is
+    // the drift the shared function exists to prevent: two copies of "assign it,
+    // tell the form" and the File Manager keeps showing yesterday's sections.
+    await fetch('/profile', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(window.SampleResume.build()),
+    });
+    await S.reloadProfile();
+    await pause(250);
+    const fmLeftText = fm.querySelector('.fm-left').textContent;
+    ok('after a reload the File Manager shows the new sections',
+       /Experience/.test(fmLeftText) && /Skills/.test(fmLeftText),
+       fmLeftText.replace(/\s+/g, ' ').slice(0, 90));
+    ok('and so does the editor',
+       /Experience/.test(ed.textContent), 'the section list');
+
     ok('KNOWN GAP: there is no AI-assisted writing yet',
        /unavailable|cannot|denied/i.test(document.body.textContent),
        'the AI window reports it honestly');

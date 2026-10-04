@@ -128,12 +128,19 @@ def test_check_llm_fails_when_openrouter_has_no_model(
     can be sent at all -- telling the user their key is missing would send them
     after the wrong problem. The key is set here deliberately, so if the model
     check were ordered second this test could not distinguish the two failures.
+
+    `LLM_MODEL` is set to an empty string rather than deleted. `run_check` builds
+    a real `Settings()`, which reads `.env`; `monkeypatch.delenv` only removes
+    the process variable, so a developer with `LLM_MODEL` in their `.env` would
+    still have it here and the test would pass for the wrong reason. The process
+    environment wins over `.env`, so an empty string genuinely overrides it --
+    and blank is caught, because `LLM_MODEL=` in a `.env` is the same situation.
     """
     from app import config
 
     monkeypatch.setenv("LLM_PROVIDER", "openrouter")
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.setenv("LLM_MODEL", "")
     client = fake_transport(_ok_reply())
 
     config.get_settings.cache_clear()

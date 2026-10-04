@@ -90,7 +90,14 @@ Two of my own earlier guards fired correctly and were rewritten rather than dele
 
 Also worth recording from the earlier template work: **two existing tests were asserting a buggy data shape** (`summary` stored as `{text: ...}` instead of a string). A test that pins incorrect behaviour is indistinguishable from one that protects correct behaviour.
 
-### Stage 5a: the Windows 95 desktop (branch `design/win95`)
+### Stage 3d: the Windows 95 desktop (branch `design/win95`)
+
+> **Renumbered.** This was called Stage 5a, and Stage 5b below was 5b. Both were
+> wrong: Stage 3 in BUILD_PLAN.md is "Frontend: profile editor", which is exactly
+> what these two stages delivered, and **Stage 5 is the JD analyzer** — so the old
+> numbering collided with a stage that has not been started. They are now 3d and
+> 3e, following 3b (templates) and 3c (front-page redesign). The git commit
+> messages still say 5a/5b; this note is the index between the two.
 
 The terminal is gone as an interface. This branch serves a Windows 95 desktop:
 free-floating overlapping windows, a menu bar and toolbar per window, a status
@@ -115,11 +122,11 @@ becomes a trap with four windows and no way to reach the one underneath.
   modern Windows, so the fallback chain matters.
 - **The 94 terminal tests were retargeted, not deleted.** They now drive the
   archived engine at `static/win/old-app.js` and still pass. They found five
-  real defects in Stage 3; deleting them quietly would throw that away. Stage 5b
+  real defects in Stage 3; deleting them quietly would throw that away. Stage 3e
   writes the equivalents against the new editor model, and the archive plus its
   tests are removed together at the end.
 
-### Bugs found in Stage 5a
+### Bugs found in Stage 3d
 
 Two of these were caught by the ported tests, which is the argument for not
 deleting them:
@@ -158,7 +165,7 @@ a scrolling marquee. All of it behind `prefers-reduced-motion`.
 no path from an icon string to anything executable. The CSP, the two-policy
 split, and the six-route surface are unchanged.
 
-### Stage 5a verification pass
+### Stage 3d verification pass
 
 Full sweep before the editor, at the user's request: the pytest suite, a
 100-check API sweep against a live server, and an 87-check browser harness that
@@ -222,17 +229,17 @@ synchronously before its async body, so a harness that dies early says so.
 
 ### Known gaps, stated plainly
 
-*Superseded by Stage 5b; kept because the closure of each is itself a record of
-what was wrong. The three below were the whole of the remaining gap list when 5b
+*Superseded by Stage 3e; kept because the closure of each is itself a record of
+what was wrong. The three below were the whole of the remaining gap list when 3e
 started, and all three are now closed.*
 
-- ~~**The editor does not exist yet.**~~ Closed in 5b part 1: `editor-model.js`
+- ~~**The editor does not exist yet.**~~ Closed in 3e part 1: `editor-model.js`
   holds the rules as pure functions, `editor.js` draws the form from them, and
   the harness types into it and reads the result back from the server.
-- ~~**There is no Export dialog yet.**~~ Closed in 5b part 2: format listbox,
+- ~~**There is no Export dialog yet.**~~ Closed in 3e part 2: format listbox,
   the personal-details decision, live filename, OK/Cancel -- and the auto-height
   bug that had been clipping those buttons off the dialog.
-- ~~**Saved versions cannot be listed or reopened.**~~ Partly closed in 5b part 2:
+- ~~**Saved versions cannot be listed or reopened.**~~ Partly closed in 3e part 2:
   `GET /versions` lists them and `DELETE /versions/{id}` removes them, which is
   what made the File Manager's Versions tab real. **Still open:** there is no
   `GET /versions/{id}`, so a listed version still cannot be *reopened* -- only
@@ -295,7 +302,7 @@ is `document.elementFromPoint()` at the control's centre — "what is under the
 cursor?" — plus a real `.click()`. That is now in the harness, and it also
 caught the harness's own full-screen log overlay intercepting pointer events.
 
-### Stage 5b: the editor
+### Stage 3e: the editor
 
 The My Resume window is a real form. Two files, split on purpose:
 
@@ -366,7 +373,7 @@ is exactly the failure that got through in Stage 3.
 
 466 tests pass. 118 browser checks pass.
 
-### Stage 5b, part 2: the Export dialog and a version browser
+### Stage 3e, part 2: the Export dialog and a version browser
 
 Both remaining gaps from part 1, plus two bugs the user found by using the app.
 

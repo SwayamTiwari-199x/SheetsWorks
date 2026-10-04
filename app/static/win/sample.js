@@ -10,9 +10,9 @@
    has to be reachable by the Sample Resume window, by the screenshot tooling,
    and by the tests, without any of them owning it.
 
-   Temporary duplication: the archived terminal at win/old-app.js still carries
-   its own copy, because that file is frozen and its tests assert against it.
-   The archive takes its copy with it when it goes in stage 5d.
+   This was duplicated in the archived terminal at win/old-app.js, which carried
+   its own frozen copy for tests to assert against. The archive has been deleted,
+   so this file is now the only copy.
    ========================================================================= */
 
 (function (global) {

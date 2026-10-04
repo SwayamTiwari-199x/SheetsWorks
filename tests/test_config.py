@@ -140,6 +140,56 @@ def test_openrouter_rejects_a_blank_model() -> None:
         assert s.model_requirement, f"{blank!r} must not pass as a model"
 
 
+def test_every_provider_key_is_scrubbed_from_the_test_environment() -> None:
+    """Regression, and it leaked a real secret.
+
+    `tests/conftest.py` listed the API key vars twice, by hand. openrouter was
+    added to `API_KEY_VARS` and to neither, so a developer's real
+    `OPENROUTER_API_KEY` was visible to the suite -- and a test asserting
+    `settings.api_key is None` failed with the key printed in the assertion
+    message.
+
+    Deriving one list from `API_KEY_VARS` fixes the live case; this test is what
+    stops the other list rotting in the same way again.
+    """
+    from tests import conftest
+
+    assert set(API_KEY_VARS.values()) <= set(conftest._PRE_IMPORT_SCRUB), (
+        "a provider key is missing from the pre-import scrub in conftest.py"
+    )
+    assert set(API_KEY_VARS.values()) <= set(conftest._LLM_ENV_VARS), (
+        "a provider key is missing from the per-test scrub in conftest.py"
+    )
+
+
+def test_the_autouse_fixture_clears_an_ambient_provider_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same leak, proven from the other direction.
+
+    Sets a key, runs the scrub, and checks it is gone. This is what actually
+    failed in practice: a developer's real `OPENROUTER_API_KEY` was visible to the
+    suite, so `assert settings.api_key is None` printed the key in its own failure
+    message.
+
+    Calls `scrub_llm_env` directly rather than the fixture, because pytest refuses
+    direct fixture calls -- and the alternative, asserting that a list contains a
+    string, would have passed while the leak was still happening.
+    """
+    import os
+
+    from tests import conftest
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-should-never-be-here")
+    assert os.getenv("OPENROUTER_API_KEY"), "precondition: the key is set"
+
+    conftest.scrub_llm_env(monkeypatch)
+
+    assert os.getenv("OPENROUTER_API_KEY") is None, (
+        "the scrub did not remove an ambient provider key"
+    )
+
+
 @pytest.mark.parametrize("provider", ["gemini", "groq", "mistral", "anthropic"])
 def test_the_other_providers_say_nothing_about_their_model(provider: str) -> None:
     """`model_requirement` exists for openrouter. Every other provider must be

@@ -5,15 +5,16 @@ are easy to break by accident and hard to notice: no innerHTML, no eval, no
 inline script or style, no remote assets, and a CSP that actually permits the
 page while keeping the API locked down.
 
-They now cover BOTH front ends, because both are in the tree: the shipped
-Windows 95 desktop, and the archived terminal page kept at
-static/win/terminal.html until the terminal is removed in a later stage. A
-security property that held only for the page you happened to be looking at is
-not a property of the project.
+They used to cover BOTH front ends, because both were in the tree: the shipped
+Windows 95 desktop, and the archived terminal page. The terminal has now been
+deleted along with its own tests, so there is one front end and these cover it.
+That matters because the two pages disagreed about several of these properties,
+and the disagreements were the interesting part.
 """
 
 from __future__ import annotations
 
+import os
 import re
 
 import pytest
@@ -23,23 +24,40 @@ from app.main import app
 
 STATIC = "app/static"
 
-# The shipped front end.
+# The shipped front end -- which is now all of it.
 JS = f"{STATIC}/win/shell.js"
 APP_JS = f"{STATIC}/win/app.js"
 CSS = f"{STATIC}/win/win95.css"
 HTML = f"{STATIC}/index.html"
 
-# The archived terminal page: still reachable, still worth guarding.
-OLD_JS = f"{STATIC}/win/old-app.js"
-OLD_CSS = f"{STATIC}/win/old-term.css"
-OLD_HTML = f"{STATIC}/win/terminal.html"
-
 MODEL_JS = f"{STATIC}/win/editor-model.js"
 EDITOR_JS = f"{STATIC}/win/editor.js"
 SAMPLE_JS = f"{STATIC}/win/sample.js"
 
-ALL_JS = (JS, APP_JS, MODEL_JS, EDITOR_JS, SAMPLE_JS, OLD_JS)
-ALL_CSS = (CSS, OLD_CSS)
+# The archived terminal page (terminal.html, old-app.js, old-term.css,
+# old-site.css) has been deleted. These two tuples used to include it, which
+# meant the no-innerHTML and no-eval sweeps covered two pages; they now cover the
+# one that ships.
+ALL_JS = (JS, APP_JS, MODEL_JS, EDITOR_JS, SAMPLE_JS)
+ALL_CSS = (CSS,)
+
+
+def test_the_archived_terminal_is_gone() -> None:
+    """The terminal UI and its tests were removed once the Windows 95 desktop
+    replaced it.
+
+    Kept as a check rather than left implicit, because these files used to be
+    load-bearing in three places (a served page, the XSS sweeps, and a 90-test
+    file) and "nothing references them any more" is exactly the kind of claim
+    that rots the moment someone adds a fifth reference.
+    """
+    for name in ("terminal.html", "old-app.js", "old-term.css", "old-site.css"):
+        assert not os.path.exists(f"{STATIC}/win/{name}"), (
+            f"{name} was archived, not deleted"
+        )
+    assert not os.path.exists(
+        os.path.join(os.path.dirname(__file__), "test_terminal_flow.py")
+    ), "the terminal flow tests should have gone with the terminal"
 
 
 def read(path: str) -> str:
@@ -381,8 +399,10 @@ def test_static_files_served() -> None:
         for asset in ("/static/win/win95.css", "/static/win/shell.js",
                       "/static/win/app.js"):
             assert c.get(asset).status_code == 200, asset
-        # The archived terminal is still served, so it stays inspectable.
-        assert c.get("/static/win/terminal.html").status_code == 200
+        # The archived terminal used to be asserted 200 here. It is deleted now,
+        # and test_the_archived_terminal_is_gone checks that it stays deleted --
+        # which is a stronger statement than "it is still served".
+        assert c.get("/static/win/terminal.html").status_code == 404
 
 
 def test_page_csp_allows_the_preview_blob_frame() -> None:
