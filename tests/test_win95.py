@@ -376,10 +376,18 @@ def test_clicking_anywhere_in_a_window_raises_it() -> None:
 
 
 def test_the_ai_window_says_why_it_is_empty() -> None:
+    """The AI notice window is now dynamic: it reads the injected LLM config
+    and shows either a ready message (if OpenRouter configured) or an error.
+    Both branches must be present in the source.
+    """
     body = APP.split("async function openAiNotice(", 1)[1][:900]
+    # Must contain the unavailable branch (for unconfigured state)
     assert "not available" in body
-    assert "rejects every available model" in body
-    assert "worse than no assistant" in body
+    assert "missing LLM_MODEL" in body
+    # Must contain the ready branch (for OpenRouter configured)
+    assert "AI Resume Builder is ready" in body
+    assert "OpenRouter is configured" in body
+    assert "Tell the AI" in body
 
 
 def test_the_exit_dialog_is_honest_about_what_it_does() -> None:

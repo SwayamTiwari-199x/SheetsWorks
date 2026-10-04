@@ -131,7 +131,11 @@ def desktop_page() -> Response:
     route surface stays exactly what Stage 3 built.
     """
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
-    payload = json.dumps({"tips": rules.tips()}, separators=(",", ":"))
+    # Inject LLM provider status so the AI notice window can report accurately.
+    from app.config import get_settings
+    s = get_settings()
+    llm_info = {"provider": s.llm_provider, "model": s.llm_model or None}
+    payload = json.dumps({"tips": rules.tips(), "llm": llm_info}, separators=(",", ":"))
     # json.dumps does not escape "<"; do it by hand so no value can close the
     # template or open a tag.
     safe = payload.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")

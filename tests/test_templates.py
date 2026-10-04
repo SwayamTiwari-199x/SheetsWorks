@@ -68,9 +68,13 @@ def test_disagreement_is_recorded_not_silently_resolved() -> None:
 
 
 def test_unknown_template_falls_back_instead_of_crashing() -> None:
-    """Version rows written before templates existed carry 'ats'."""
-    assert rules.template("ats")["label"] == rules.template("blank")["label"]
-    assert rules.template(None)["label"] == rules.template("blank")["label"]
+    """Version rows written before templates existed no longer carry a separate 'ats'
+    template: unknown names fall back to the default template.
+    """
+    # Unknown template names fall back to the default template.
+    assert rules.template("ats") == rules.template(None)
+    # The default template is now 'sheets', not 'blank'.
+    assert rules.template(None)["label"] == "SheetsResume - no summary, one Interests line at the end"
 
 
 def test_student_order_is_not_the_experienced_one() -> None:

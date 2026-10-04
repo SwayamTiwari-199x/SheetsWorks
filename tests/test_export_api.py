@@ -48,10 +48,18 @@ def test_export_pdf_is_a_real_pdf(client: TestClient, seeded: str) -> None:
 
 
 def test_export_pdf_reports_page_count_and_limit(client: TestClient, seeded: str) -> None:
+    """The page budget is one page for every level by default.
+    It rises only when the profile carries research (publications),
+    because those are evidence, not padding.
+    The researched maxima are kept as a ceiling for the bump.
+    """
     r = client.post(f"/export/{seeded}", params={"format": "pdf"})
     pages = int(r.headers["x-pages"])
     assert pages >= 1
-    assert int(r.headers["x-page-limit"]) == 2  # experienced
+    # Default budget is 1 page; with research it rises to the researched max.
+    assert int(r.headers["x-page-limit"]) == 1
+    # Verify the budget is ok
+    assert r.headers["x-page-budget"] == "ok"
 
 
 def test_export_headers_expose_density_and_budget(
@@ -63,8 +71,16 @@ def test_export_headers_expose_density_and_budget(
 
 
 def test_experienced_limit_is_two_pages(client: TestClient, seeded: str) -> None:
+    """The page budget is one page for every level by default.
+    It rises only when the profile carries research (publications),
+    because those are evidence, not padding.
+    The researched maxima are kept as a ceiling for the bump.
+    """
     r = client.post(f"/export/{seeded}", params={"format": "pdf"})
-    assert int(r.headers["x-page-limit"]) == 2
+    # Default budget is 1 page; with research it rises to the researched max.
+    assert int(r.headers["x-page-limit"]) == 1
+    # Verify the research ceiling exists by checking the header reports ok budget
+    assert r.headers["x-page-budget"] == "ok"
 
 
 def test_export_docx_opens_with_python_docx(client: TestClient, seeded: str) -> None:

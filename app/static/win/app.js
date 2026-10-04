@@ -1068,15 +1068,31 @@ function refreshPreviewSoon() {
 /* ---- AI notice ---------------------------------------------------------- */
 
 async function openAiNotice() {
-  await W.messageBox({
-    title: 'Sheetsworks', icon: 'error', heading: 'The AI Resume Builder is not available',
-    message: 'The provider this project is configured against currently ' +
-             'rejects every available model for this account, so anything built ' +
-             'now would fail silently or lie about what it did.\n\n' +
-             'An assistant that guesses is worse than no assistant on a ' +
-             'document you are about to send.',
-    buttons: ['OK'],
-  });
+  // Read the injected LLM info from the page template
+  const tmpl = document.getElementById('tipsData');
+  let llm = { provider: null, model: null };
+  if (tmpl) {
+    try { llm = JSON.parse(tmpl.textContent).llm || llm; } catch (_) {}
+  }
+  const provider = llm.provider;
+  const model = llm.model;
+  if (provider === 'openrouter' && model) {
+    await W.messageBox({
+      title: 'AI Resume Builder', icon: 'info',
+      heading: 'The AI Resume Builder is ready',
+      message: 'OpenRouter is configured with model: ' + model + '.\n\n' +
+               'Open a section in My Resume and click "Tell the AI" to start.',
+      buttons: ['OK'],
+    });
+  } else {
+    await W.messageBox({
+      title: 'Sheetsworks', icon: 'error', heading: 'The AI Resume Builder is not available',
+      message: 'No LLM provider configured, or OpenRouter is missing LLM_MODEL.\n\n' +
+               'Set LLM_PROVIDER=openrouter and LLM_MODEL to a valid model ID, ' +
+               'then restart the application.',
+      buttons: ['OK'],
+    });
+  }
 }
 
 /* ======================================================== taskbar / start = */

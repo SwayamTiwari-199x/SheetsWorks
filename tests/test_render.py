@@ -254,8 +254,16 @@ def test_criterion3_student_fits_page_limit(student_profile: Profile) -> None:
 
 
 def test_criterion3_page_limit_comes_from_rules_json() -> None:
+    """The page budget is one page for every level by default.
+    It rises only when the profile carries research (publications),
+    because those are evidence, not padding.
+    The researched per-level maxima are kept as a ceiling for the bump,
+    so the product decision does not erase them; they are recorded in rules.json.
+    """
     assert rules.page_limit("student") == 1
-    assert rules.page_limit("experienced") == 2
+    assert rules.page_limit("experienced") == 1
+    # The researched maxima are preserved as a ceiling for the bump:
+    assert rules.page_limit("experienced", has_research=True) == 2
 
 
 def test_criterion3_level_detection_ignores_internships(student_profile: Profile) -> None:

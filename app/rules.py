@@ -159,6 +159,17 @@ def page_limit(level: str, *, has_research: bool = False) -> int:
     return min(base + int(limits.get("research_bump", 1)), ceiling)
 
 
+def page_limit_verification(level: str) -> str:
+    """Return the verification tag for the page budget (max), not the research.
+
+    The budget max:1 is a product decision (unverified); the researched_max
+    carries the original verified tags. Stage 7 uses this to treat the budget
+    as a warning, not a block.
+    """
+    spec = load_rules()["page_limits"][level]
+    return spec.get("max_tag", "unverified")
+
+
 def doc_has_research(doc) -> bool:
     """Whether this document carries a research section worth a second page.
 

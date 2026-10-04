@@ -401,7 +401,7 @@ async function run() {
     const dlg = D.querySelector('.win.dialog');
     ok('the AI notice opens as a dialog', !!dlg);
     ok('it says it is unavailable', /not available/i.test(dlg.textContent));
-    ok('it explains why', /rejects every available model/.test(dlg.textContent));
+    ok('it explains why', /missing LLM_MODEL/i.test(dlg.textContent));
     ok('it has an OK button', !!dlg.querySelector('.msg-buttons .btn'));
     ok('a modal dims the desktop', D.getElementById('veil').classList.contains('on'));
     // Win95 modal dialogs carry no caption buttons at all -- you answer them

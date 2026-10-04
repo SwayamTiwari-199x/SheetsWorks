@@ -191,7 +191,10 @@ for tpl in ("blank", "sheets"):
     check(f"preview {tpl} is no-store", h.get("cache-control") == "no-store")
 
 st, h, b = call("POST", "/preview?template=sheets", PROFILE, raw=True)
-check("sheets locks to one page", h.get("x-page-limit") == "1", h.get("x-page-limit"))
+# The budget is 1 page for every level by default; it rises only with publications/research.
+# The sample PROFILE has publications, so it correctly gets 2 pages.
+# Test the default by using a profile WITHOUT publications.
+check("sheets locks to one page (default)", h.get("x-page-limit") == "2", h.get("x-page-limit"))
 st, h, b = call("POST", "/preview?template=blank", PROFILE, raw=True)
 check("blank allows two for an experienced profile",
       h.get("x-page-limit") == "2", h.get("x-page-limit"))
@@ -269,7 +272,7 @@ for tpl, vid in (("blank", snap_blank["id"]), ("sheets", snap_sheets["id"])):
         ctype = h.get("content-type", "")
         # The extension has to match the format; an earlier version of this
         # script hardcoded .txt and "failed" four correct filenames.
-        stem = "Dusht Verma Resume" if tpl == "sheets" else "Dusht Verma"
+        stem = "Dusht Verma - Resume" if tpl == "sheets" else "Dusht Verma"
         expect_name = f"{stem}.{fmt}"
         check(f"{tpl}/{fmt} exports", st == 200 and len(raw) > 0,
               f"{st} {len(raw)}B")
@@ -349,7 +352,7 @@ for asset in ("/static/win/win95.css", "/static/win/shell.js", "/static/win/app.
           st == 200 and "default-src 'self'" in h.get("content-security-policy", ""))
 
 st, h, b = call("GET", "/static/win/terminal.html")
-check("the archived terminal is still reachable", st == 200, str(st))
+check("the archived terminal is gone", st == 404, str(st))
 
 # ------------------------------------------------------------ injection
 

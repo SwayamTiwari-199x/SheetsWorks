@@ -13,13 +13,13 @@
     "recruiter_scan_gap_before_tailoring": "Most resumes fail the 7-second scan when contact, most recent role, or education is buried."
   },
   "page_limits": {
-    "_note": "The budget is ONE PAGE for every level. It rises by research_bump, capped at researched_max, only when the profile carries research (publications) -- those are evidence, not padding. `max` is the budget the app enforces. `researched_max` is the figure the research supports and is kept so the product decision above does not erase it; it is a ceiling for the bump, not a target.",
+    "_note": "The budget is ONE PAGE for every level. It rises by research_bump, capped at researched_max, only when the profile carries research (publications) -- those are evidence, not padding. `max` is the budget the app enforces (unverified product decision). `researched_max` is the figure the research supports (verified where marked); it is a ceiling for the bump, not a target.",
     "research_bump": 1,
-    "student": { "max": 1, "target": 1, "researched_max": 1, "tag": "verified" },
-    "fresher": { "max": 1, "target": 1, "researched_max": 1, "tag": "verified" },
-    "experienced": { "max": 1, "target": 1, "researched_max": 2, "tag": "verified" },
-    "executive_15y_plus": { "max": 1, "target": 1, "researched_max": 3, "tag": "unverified" },
-    "us_federal": { "max": 1, "target": 1, "researched_max": 2, "hard_cap": true, "tag": "verified" }
+    "student": { "max": 1, "max_tag": "unverified", "target": 1, "researched_max": 1, "researched_tag": "verified" },
+    "fresher": { "max": 1, "max_tag": "unverified", "target": 1, "researched_max": 1, "researched_tag": "verified" },
+    "experienced": { "max": 1, "max_tag": "unverified", "target": 1, "researched_max": 2, "researched_tag": "verified" },
+    "executive_15y_plus": { "max": 1, "max_tag": "unverified", "target": 1, "researched_max": 3, "researched_tag": "unverified" },
+    "us_federal": { "max": 1, "max_tag": "unverified", "target": 1, "researched_max": 2, "researched_tag": "verified", "hard_cap": true }
   },
   "ats": {
     "file_formats_ranked": ["text_pdf", "docx"],
