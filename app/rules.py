@@ -137,10 +137,44 @@ def template_order(name: str | None, level: str) -> list[str]:
 # --- layout / limits -------------------------------------------------------
 
 
-def page_limit(level: str) -> int:
-    """Max pages allowed for this level (rules.json page_limits)."""
+def page_limit(level: str, *, has_research: bool = False) -> int:
+    """Page budget for this resume (rules.json page_limits).
+
+    One page for every level by default. It rises only for a profile carrying
+    research -- publications, or anything the caller counts as research -- because
+    a publication list is evidence rather than padding, and cutting one to hit a
+    page target loses something the candidate actually did.
+
+    The per-level maxima that came out of the research are kept alongside as
+    `researched_max`. They are not the budget; they are the ceiling the bump is
+    allowed to reach, so the researched figures stay on record instead of being
+    overwritten by a product decision. rules.json says the same in prose.
+    """
     limits = load_rules()["page_limits"]
-    return int(limits[level]["max"])
+    spec = limits[level]
+    base = int(spec["max"])
+    if not has_research:
+        return base
+    ceiling = int(spec.get("researched_max", base))
+    return min(base + int(limits.get("research_bump", 1)), ceiling)
+
+
+def doc_has_research(doc) -> bool:
+    """Whether this document carries a research section worth a second page.
+
+    Derived from the Doc rather than the Profile because the budget is a property
+    of the thing being printed: a caller holding only the profile would also need
+    the template to answer, and the template is what decides whether publications
+    are printed at all.
+
+    `publications` is the only research-shaped section in the model; there is no
+    separate `research` field. A caller with something else in mind should add it
+    here rather than inventing a second notion of "research" elsewhere.
+    """
+    return any(
+        getattr(section, "key", "") == "publications" and section.entries
+        for section in getattr(doc, "sections", [])
+    )
 
 
 def font_family() -> str:

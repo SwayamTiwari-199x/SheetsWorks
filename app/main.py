@@ -247,7 +247,7 @@ def create_version(version: Version) -> Version:
 def snapshot_current_profile(
     name: str = "current",
     include_personal_details: bool = False,
-    template: str = Query("blank", description="resume template name"),
+    template: str = Query("sheets", description="resume template name"),
 ) -> Version:
     """Convenience: snapshot whatever is in /profile right now."""
     stored = db.get_profile(PROFILE_ID)
@@ -326,7 +326,7 @@ def export_version(
 @app.post("/preview")
 def preview_current_profile(
     profile: Profile,
-    template: str = Query("blank", description="resume template name"),
+    template: str = Query("sheets", description="resume template name"),
 ) -> Response:
     """Render the profile the caller just sent, without storing a version.
 
@@ -358,11 +358,21 @@ def preview_current_profile(
 def _page_limit_for(doc, template: str) -> int:
     """Page budget for this resume.
 
-    A template may be stricter than the researched default -- the sheets
-    template demands one page even for experienced candidates, per its source.
+    One page for every level, rising only when the document carries research --
+    see rules.page_limit for why the researched per-level maxima are kept as a
+    ceiling rather than used as the budget.
+
+    The per-template `max_pages` override is honoured when present, so a template
+    can still be stricter than the default. The sheets template no longer sets one:
+    it used to hard-limit to a single page even for someone with publications, and
+    that was a source-derived rule the product has since overruled.
     """
     spec = rules.template(template)
-    return int(spec.get("max_pages") or rules.page_limit(doc.level))
+    research = rules.doc_has_research(doc)
+    override = spec.get("max_pages")
+    if override:
+        return int(override)
+    return rules.page_limit(doc.level, has_research=research)
 
 
 def _export_filename(version, fmt: str) -> str:

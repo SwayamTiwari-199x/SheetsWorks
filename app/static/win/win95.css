@@ -38,7 +38,7 @@
   --title-ib:    #b5b5b5;
   --sel-bg:      #000080;  /* selection                             */
   --sel-fg:      #ffffff;
-  --sel-bg-off:  #c0c0c0;  /* unfocused selection                   */
+  --sel-bg-off:  #b0b0b0;  /* unfocused selection — distinct from face and field bg */
   --sel-fg-off:  #000000;
   --info-bg:     #ffffe1;  /* message box body                      */
   --disabled:    #808080;

@@ -85,7 +85,7 @@ def render_pdf_report(doc: Doc, max_pages: int | None = None) -> tuple[bytes, in
 
 def _render(doc: Doc, max_pages: int | None) -> tuple[bytes, int, str]:
     if max_pages is None:
-        max_pages = rules.page_limit(doc.level)
+        max_pages = rules.page_limit(doc.level, has_research=rules.doc_has_research(doc))
 
     last: tuple[bytes, int, str] | None = None
     for density in DENSITIES:

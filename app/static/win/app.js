@@ -33,7 +33,7 @@ const store = {
 
 const state = {
   profile: null,
-  template: 'blank',
+  template: 'sheets',
   tips: [],
   sound: store.get('rb.sound', false) === true,
 };
@@ -195,8 +195,8 @@ function openAbout() {
     const h = el('span', 'title', 'Sheetsworks');
     text.appendChild(h);
     text.appendChild(el('div', null,
-      'A resume builder that shows you the real exported PDF while you write, ' +
-      'and tells you where you are breaking the rules.'));
+      'A resume builder with a Windows 95 desktop, a profile editor, and a File Manager' +
+      'with Resume and Versions tabs. Export produces valid PDF, DOCX, or TXT. A profile'));
     text.appendChild(el('div', null, 'Two formats: blank and sheets. See Read Me for why.'));
     row.appendChild(text);
     rec.body.appendChild(row);
@@ -1226,8 +1226,7 @@ async function bootPromise() {
 
 async function bootInner() {
   state.tips = loadTips();
-  state.template = store.get('rb.template', 'blank');
-  if (state.template !== 'sheets') state.template = 'blank';
+  state.template = store.get('rb.template', 'sheets');
   state.sound = store.get('rb.sound', false) === true;
 
   buildDesktop();
@@ -1303,6 +1302,7 @@ window.Sheetsworks = {
   openAbout, openAiNotice, confirmExit, loadSample,
   openExport, setFmMode, loadVersions,
   downloadProfileJson, uploadProfileJson, reloadProfile,
+  saveProfile,
   ready,
 };
 

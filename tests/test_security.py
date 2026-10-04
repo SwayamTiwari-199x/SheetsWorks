@@ -239,7 +239,7 @@ def test_filename_cannot_be_dot_only() -> None:
         v = client.post("/versions/from-profile", params={"name": ".."}).json()
         r = client.post(f"/export/{v['id']}", params={"format": "txt"})
     inner = r.headers["content-disposition"].split("filename=", 1)[1].strip('"')
-    assert inner == "resume.txt", inner
+    assert inner == "Resume.txt", inner
 
 
 @pytest.mark.parametrize(

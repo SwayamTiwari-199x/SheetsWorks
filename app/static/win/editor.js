@@ -87,7 +87,7 @@ function sectionLabel(key) {
   return s.label + (n ? '  (' + n + ')' : '  —');
 }
 
-let state = { profile: null, onChanged: null, template: 'blank' };
+let state = { profile: null, onChanged: null, template: 'sheets' };
 
 function renderSections(host) {
   host.textContent = '';
@@ -432,7 +432,7 @@ function open(profile, opts) {
   state = {
     profile: profile,
     onChanged: o.onChanged || null,
-    template: o.template || 'blank',
+    template: o.template || 'sheets',
   };
   history = new M.History();
   dirty = false;

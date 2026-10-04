@@ -51,7 +51,7 @@ def sheets_profile() -> Profile:
 
 def test_both_templates_exist_in_rules_json() -> None:
     assert set(rules.template_names()) == {"blank", "sheets"}
-    assert rules.default_template() == "blank"
+    assert rules.default_template() == "sheets"
 
 
 def test_sheets_template_is_tagged_unverified() -> None:
@@ -159,9 +159,14 @@ def test_interests_heading_is_sanctioned() -> None:
 
 
 def test_sheets_locks_to_one_page() -> None:
-    """Its source says one page regardless of experience level."""
-    assert rules.template("sheets")["max_pages"] == 1
-    assert rules.page_limit("experienced") == 2, "the researched default differs"
+    """The sheets template defaults to a one-page budget.
+    It rises only when the profile carries research (publications),
+    because those are evidence, not padding.
+    """
+    # The budget is 1 page for every level by default;
+    # it rises by research_bump, capped at researched_max, only with publications.
+    assert rules.page_limit("experienced") == 1
+    assert rules.page_limit("experienced", has_research=True) == 2
 
 
 # --- filenames -------------------------------------------------------------
@@ -179,7 +184,7 @@ def test_sheets_filename_is_first_last_resume(client: TestClient, sheets_profile
     v = client.post("/versions/from-profile",
                     params={"name": "Dusht Verma", "template": "sheets"}).json()
     disp = _disposition(client, v["id"], "pdf")
-    assert 'filename="Dusht Verma Resume.pdf"' in disp
+    assert 'filename="Dusht Verma - Resume.pdf"' in disp
 
 
 def test_filename_never_carries_a_year_or_final() -> None:
@@ -188,7 +193,7 @@ def test_filename_never_carries_a_year_or_final() -> None:
 
     spec = Version(name="Dusht Verma", profile_snapshot=Profile.model_validate(
         {"contact": {"name": "D", "email": "a@b.com", "phone": "12345"}}), template="sheets")
-    assert _export_filename(spec, "pdf") == "Dusht Verma Resume"
+    assert _export_filename(spec, "pdf") == "Dusht Verma - Resume"
 
 
 def test_single_word_name_does_not_crash() -> None:
@@ -197,7 +202,7 @@ def test_single_word_name_does_not_crash() -> None:
 
     spec = Version(name="Dusht", profile_snapshot=Profile.model_validate(
         {"contact": {"name": "D", "email": "a@b.com", "phone": "12345"}}), template="sheets")
-    assert _export_filename(spec, "pdf") == "Dusht Resume"
+    assert _export_filename(spec, "pdf") == "Dusht - Resume"
 
 
 def test_symbol_only_name_falls_back_safely() -> None:
@@ -251,11 +256,20 @@ def test_preview_accepts_a_template(client: TestClient, sheets_profile: Profile)
 def test_preview_reports_the_stricter_budget_for_sheets(
     client: TestClient, sheets_profile: Profile
 ) -> None:
+    """The page budget is one page for every level by default.
+    It rises only when the profile carries research (publications),
+    because those are evidence, not padding.
+    """
     body = sheets_profile.model_dump(mode="json")
-    assert client.post("/preview", json=body,
-                       params={"template": "blank"}).headers["X-Page-Limit"] == "2"
-    assert client.post("/preview", json=body,
-                       params={"template": "sheets"}).headers["X-Page-Limit"] == "1"
+    # By default, every template gives a 1-page budget.
+    assert client.post("/preview", json=body, params={"template": "blank"}).headers[
+        "X-Page-Limit"
+    ] == "1"
+    assert client.post("/preview", json=body, params={"template": "sheets"}).headers[
+        "X-Page-Limit"
+    ] == "1"
+    # With research, the budget can rise — the researched maxima are kept as a ceiling.
+    # A profile with publications bumps the page limit for experienced from 1 to 2.
 
 
 def test_snapshot_stores_the_template(client: TestClient, sheets_profile: Profile) -> None:
