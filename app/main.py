@@ -397,3 +397,45 @@ def _export_filename(version, fmt: str) -> str:
         full = f"{parts[0]} {parts[-1]}"
     rendered = pattern.replace("{name}", full)
     return _clean_filename(rendered)
+
+
+@app.post("/assist/{section}")
+def assist_extract(section: str, body: dict) -> dict:
+    """Extract structured entries + follow-up questions from free text.
+
+    Body: {"free_text": "worked on backend for a staffing app using FastAPI and Postgres"}
+    Returns: {"entries": [...], "questions": [...]}
+    """
+    from .assist import ask_clarifying
+
+    free_text = body.get("free_text", "")
+    if not free_text.strip():
+        raise HTTPException(status_code=400, detail="free_text is required")
+    try:
+        result = ask_clarifying(section, free_text)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return result.model_dump()
+
+
+@app.post("/assist/answer")
+def assist_answer(body: dict) -> dict:
+    """Polish facts into bullets.
+
+    Body: {"section": "experience", "raw_facts": "...", "answers": "..."}
+    Returns: {"bullets": ["...", "..."]}
+    """
+    from .assist import write_bullets
+
+    section = body.get("section", "")
+    raw_facts = body.get("facts", "")
+    answers = body.get("answers", "")
+    if not section:
+        raise HTTPException(status_code=400, detail="section is required")
+    if not raw_facts.strip():
+        raise HTTPException(status_code=400, detail="raw_facts is required")
+    try:
+        result = write_bullets(section, raw_facts, answers)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return result.model_dump()

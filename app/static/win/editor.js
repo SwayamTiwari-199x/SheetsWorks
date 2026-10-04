@@ -249,6 +249,13 @@ function renderFields(host) {
           try { apply(key, picked, 'bullet', v); } catch (e) { complain([{ message: e.message }]); }
         });
     }));
+    /* Tell the AI: per-section assistant for bullet writing. Only for
+       sections that support it — Experience, Projects, Achievements. */
+    const aiSections = ['experience', 'projects', 'achievements_awards'];
+    if (aiSections.includes(key)) {
+      host.appendChild(lineButton('Tell the AI...', () => openAiAssist(key, picked, host),
+        { title: 'Ask the AI to write or polish bullets for this entry' }));
+    }
   }
 
   (Object.keys(spec.appenders || {})).forEach((f) => {
@@ -316,6 +323,149 @@ function askText(title, hint, onOk) {
   dlg.body.appendChild(bar);
   setTimeout(() => f._input.focus(), 0);
   return dlg;
+}
+
+/* Tell the AI: a per-section dialog for bullet writing. */
+async function openAiAssist(sectionKey, entryIndex, host) {
+  const spec = M.spec(sectionKey);
+  const entries = M.entries(state.profile, sectionKey);
+  const entry = entries[entryIndex - 1];
+  if (!entry) return;
+
+  /* Step 1: free-text dump. */
+  const dumpDlg = W.createWindow({
+    dialog: true, modal: true, title: 'Tell the AI — ' + spec.label, icon: 'app',
+    w: 460, h: 340, status: false, minimisable: false, resizable: false,
+  });
+  dumpDlg.body.appendChild(el('p', 'ed-blurb',
+    'Paste or type a rough description of what you did. The AI will ask clarifying questions, then write bullets.'));
+  const textarea = el('textarea', 'field', '');
+  textarea.className = 'field';
+  textarea.style.width = '100%';
+  textarea.style.height = '140px';
+  textarea.style.resize = 'vertical';
+  dumpDlg.body.appendChild(textarea);
+  const bar1 = el('div', 'msg-buttons');
+  const cancel1 = button('Cancel', () => W.close(dumpDlg.id));
+  const next1 = button('Continue', async () => {
+    const text = textarea.value.trim();
+    if (!text) { textarea.focus(); return; }
+    bar1.querySelectorAll('button').forEach(b => b.disabled = true);
+    try {
+      const res = await fetch('/assist/' + encodeURIComponent(sectionKey), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ free_text: text }),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      W.close(dumpDlg.id);
+      if (data.questions && data.questions.length) {
+        showQuestions(sectionKey, entryIndex, text, data, host);
+      } else {
+        showSuggestions(sectionKey, entryIndex, text, '', data, host);
+      }
+    } catch (err) {
+      bar1.querySelectorAll('button').forEach(b => b.disabled = false);
+      await W.messageBox({ title: 'Error', icon: 'error', heading: 'AI request failed', message: err.message, buttons: ['OK'] });
+    }
+  }, { default: true });
+  bar1.appendChild(cancel1);
+  bar1.appendChild(next1);
+  dumpDlg.body.appendChild(bar1);
+  setTimeout(() => textarea.focus(), 0);
+}
+
+/* Step 2: show clarifying questions, collect answers. */
+async function showQuestions(sectionKey, entryIndex, freeText, data, host) {
+  const spec = M.spec(sectionKey);
+  const qDlg = W.createWindow({
+    dialog: true, modal: true, title: 'Questions — ' + spec.label, icon: 'app',
+    w: 460, h: 380, status: false, minimisable: false, resizable: false,
+  });
+  qDlg.body.appendChild(el('p', 'ed-blurb', 'The AI needs a few details before it can write strong bullets:'));
+  const inputs = [];
+  data.questions.forEach((q, i) => {
+    qDlg.body.appendChild(el('label', 'ed-label', (i + 1) + '. ' + q));
+    const inp = el('input', 'field');
+    inp.className = 'field';
+    inp.style.width = '100%';
+    qDlg.body.appendChild(inp);
+    inputs.push(inp);
+  });
+  const bar2 = el('div', 'msg-buttons');
+  const cancel2 = button('Cancel', () => W.close(qDlg.id));
+  const done2 = button('Done', async () => {
+    const answers = inputs.map((inp, i) => (i + 1) + '. ' + (inp.value || '(no answer)')).join('\n');
+    bar2.querySelectorAll('button').forEach(b => b.disabled = true);
+    try {
+      const res = await fetch('/assist/answer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ section: sectionKey, facts: freeText, answers: answers }),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const result = await res.json();
+      W.close(qDlg.id);
+      showSuggestions(sectionKey, entryIndex, freeText, answers, result, host);
+    } catch (err) {
+      bar2.querySelectorAll('button').forEach(b => b.disabled = false);
+      await W.messageBox({ title: 'Error', icon: 'error', heading: 'AI request failed', message: err.message, buttons: ['OK'] });
+    }
+  }, { default: true });
+  bar2.appendChild(cancel2);
+  bar2.appendChild(done2);
+  qDlg.body.appendChild(bar2);
+  setTimeout(() => inputs[0] && inputs[0].focus(), 0);
+}
+
+/* Step 3: show polished bullets, accept/edit/reject. */
+async function showSuggestions(sectionKey, entryIndex, freeText, answers, data, host) {
+  const spec = M.spec(sectionKey);
+  const entry = M.entries(state.profile, sectionKey)[entryIndex - 1];
+  if (!entry) return;
+
+  const sDlg = W.createWindow({
+    dialog: true, modal: true, title: 'AI Bullet Suggestions — ' + spec.label, icon: 'app',
+    w: 520, h: 400, status: false, minimisable: false, resizable: false,
+  });
+  sDlg.body.appendChild(el('p', 'ed-blurb', 'Accept, edit, or reject each suggestion. Accepted bullets are added to this entry.'));
+  const bullets = data.bullets || [];
+  if (!bullets.length) {
+    sDlg.body.appendChild(el('p', 'ed-blurb', 'The AI did not produce any bullets. Try adding more detail above.'));
+  }
+  const list = el('div', 'ed-bullet-list');
+  bullets.forEach((b, i) => {
+    const row = el('div', 'ed-bullet-suggestion');
+    const ta = el('textarea', 'field', b);
+    ta.className = 'field';
+    ta.style.width = '100%';
+    ta.style.height = '44px';
+    ta.style.resize = 'vertical';
+    row.appendChild(ta);
+    const actions = el('div', 'ed-bullet-actions');
+    const accept = button('Accept', async () => {
+      const text = ta.value.trim();
+      if (!text) return;
+      history.push(JSON.stringify(state.profile));
+      const facts = freeText + (answers ? '\n' + answers : '');
+      entry.bullets.push(M.makeBullet(text, facts));
+      changed();
+      renderFields(host);
+      W.close(sDlg.id);
+    });
+    const reject = button('Reject', () => row.remove());
+    actions.appendChild(accept);
+    actions.appendChild(reject);
+    row.appendChild(actions);
+    list.appendChild(row);
+  });
+  sDlg.body.appendChild(list);
+
+  const bar3 = el('div', 'msg-buttons');
+  const close = button('Close', () => W.close(sDlg.id));
+  bar3.appendChild(close);
+  sDlg.body.appendChild(bar3);
 }
 
 function selectField(labelText, value, onChange, options) {

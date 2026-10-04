@@ -124,6 +124,7 @@ check("the route surface is exactly what the app uses", paths == sorted([
     "/health", "/profile",
     "/versions", "/versions/{version_id}", "/versions/from-profile",
     "/export/{version_id}", "/preview",
+    "/assist/{section}", "/assist/answer",
 ]), str(paths))
 
 # ---------------------------------------------------------------- profile

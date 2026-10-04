@@ -31,20 +31,12 @@ def test_openapi_schema_builds() -> None:
     assert {"get", "put"} <= set(schema["paths"]["/profile"])
 
 
-def test_stage3_exposes_only_its_own_routes() -> None:
+def test_stage4_exposes_its_routes() -> None:
     """Scope guard against speculative endpoints creeping back.
 
-    Deliberately widened in Stage 5b by two routes, `GET /versions` and
-    `DELETE /versions/{version_id}`. Snapshots had been write-only: you could
-    make one and never list or remove it, which made the File Manager's claim to
-    be a version browser untrue. "Six routes" was a number to preserve, not a
-    property worth keeping -- but the test stays an exact set, so the next
-    endpoint cannot appear without this failing.
-
-    Stage 3 added exactly one API route, POST /preview, because the live preview
-    must render the profile the browser currently holds rather than wait for
-    the debounced autosave. Everything else (assist, jd, tailor, validate,
-    applications) belongs to a later stage and must stay absent.
+    Stage 4 adds exactly two routes: POST /assist/{section} and POST /assist/answer.
+    Everything else (jd, tailor, validate, applications) belongs to a later
+    stage and must stay absent.
     """
     with TestClient(app) as client:
         paths = set(client.get("/openapi.json").json()["paths"])
@@ -56,6 +48,8 @@ def test_stage3_exposes_only_its_own_routes() -> None:
         "/versions/from-profile",
         "/export/{version_id}",
         "/preview",
+        "/assist/{section}",
+        "/assist/answer",
     }
 
 
@@ -65,9 +59,9 @@ def test_validate_stub_is_gone() -> None:
 
 
 def test_later_stage_routes_are_absent() -> None:
-    """Nothing from Stage 4-8 may exist yet."""
+    """Nothing from Stage 5-8 may exist yet."""
     with TestClient(app) as client:
         paths = set(client.get("/openapi.json").json()["paths"])
-    for not_yet in ("/assist/{section}", "/assist/answer", "/jd/analyze", "/jd/gap",
+    for not_yet in ("/jd/analyze", "/jd/gap",
                     "/tailor", "/applications", "/validate/{version_id}"):
         assert not_yet not in paths, f"{not_yet} belongs to a later stage"

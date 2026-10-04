@@ -697,6 +697,11 @@ textarea.ed-input { height: 64px; }
 
 .btn.ed-wide { width: 100%; margin-bottom: 6px; }
 
+.ed-bullet-list { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; max-height: 260px; overflow-y: auto; }
+.ed-bullet-suggestion { border: 1px solid var(--btn-shadow); padding: 6px; background: var(--face); }
+.ed-bullet-actions { display: flex; gap: 6px; margin-top: 6px; justify-content: flex-end; }
+.ed-bullet-actions .btn { min-width: 60px; height: 18px; padding: 0 8px; font-size: 10px; }
+
 .ed-bar {
   flex: 0 0 auto;
   display: flex;

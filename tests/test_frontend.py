@@ -541,5 +541,5 @@ def test_route_set_grew_by_exactly_the_ui() -> None:
     assert "/preview" in paths
     assert "/profile" in paths
     assert "/export/{version_id}" in paths
-    for later in ("/assist/{section}", "/jd/analyze", "/tailor", "/applications"):
+    for later in ("/jd/analyze", "/tailor", "/applications"):
         assert later not in paths, f"{later} belongs to a later stage"

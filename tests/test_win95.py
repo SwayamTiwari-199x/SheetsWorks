@@ -639,6 +639,7 @@ def test_the_route_surface_is_exactly_what_the_app_uses() -> None:
         "/health", "/profile",
         "/versions", "/versions/{version_id}", "/versions/from-profile",
         "/export/{version_id}", "/preview",
+        "/assist/{section}", "/assist/answer",
     }
 
 

@@ -177,6 +177,12 @@
     "quantification": "report real scale/metrics only (users, latency, cost, time, revenue, team size); if no number, state scope of work. NEVER invent numbers.",
     "summary": { "lines": [2, 4], "words": [50, 100], "tag": "verified" },
     "low_metric_verbs_banned_in_openers": ["responsible for", "helped", "assisted", "participated", "worked on various"],
+    "ai_tells": {
+      "words": ["leveraged", "spearheaded", "seamlessly", "robust", "cutting-edge", "delve", "passionate", "synergize", "utilize", "orchestrate", "innovative", "dynamic", "proactive", "holistic", "versatile"],
+      "action": "warn only — tell the user these words sound AI-generated and suggest plainer alternatives",
+      "tag": "unverified",
+      "source": "RULES.md 4 + user request"
+    },
     "company_overview_bullet": {
       "optional": true,
       "description": "Lead with a bullet about your employer's scale (Fortune 500, revenue, users, employees) to anchor the screener on big numbers. Text comes ONLY from user input — never from model knowledge. Interview mode asks for it.",
@@ -184,11 +190,18 @@
       "tag": "unverified"
     },
     "strongest_bullet_first": {
-      "description": "The first bullet under each role should be the most impressive (the 'anchor'). If a weaker bullet leads, warn the user.",
+      "definition": "Warn only if some bullet in the entry has a metric and the first bullet does not. Do not warn if no bullet has a metric, or if the first bullet already does.",
+      "action": "warning — the first bullet is the anchor; the strongest metric should lead",
       "source": "https://sheetsresume.com/advice/how-much-should-i-tailor-my-resume-for-each-job-application",
-      "tag": "unverified",
-      "warning": true
+      "tag": "unverified"
     }
+  },
+  "ai_scope": {
+    "bullet_writing_sections": ["experience", "projects", "achievements_awards"],
+    "structure_only_sections": ["education", "contact"],
+    "description": "Bullet writing (polish + structure) is allowed only for Experience, Projects, and Achievements/Extracurriculars. For Education and Contact, the AI may only structure what the user typed — no polishing, no added wording.",
+    "tag": "unverified",
+    "source": "user request"
   },
   "tailoring": {
     "description": "Light tailoring only. You may change: (a) job title — only with an explicit confirm dialog; (b) the anchor/first bullet; (c) the order of skills. Do NOT rewrite the whole resume per application. Do NOT misrepresent yourself.",
