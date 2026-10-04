@@ -1,11 +1,11 @@
 {
   "meta": {
     "generated_at": "2026-10-02",
-    "source_doc": "RULES.md",
+    "source_doc": "RULES.md + GUIDE.md (SheetsResume.com)",
     "source_count": 75,
     "source_domain_count": 56,
-    "source_count_method": "distinct URLs cited in RULES.md, trailing punctuation trimmed; 85 citations total, 9 URLs cited twice against two different rules. See RULES.md header.",
-    "notes": "All rules carry sources and verified/unverified tags in RULES.md. Market data freshness is tracked in market_snapshot.stale_after, not prose."
+    "source_count_method": "distinct URLs cited in RULES.md and GUIDE.md, trailing punctuation trimmed",
+    "notes": "Rules adopted from GUIDE.md are tagged unverified with page URL as source. All other rules retain their original Stage 0 tags."
   },
   "recruiter_behavior": {
     "initial_scan_seconds": { "median_estimate": 7.4, "range": [5, 30], "tag": "verified" },
@@ -72,7 +72,7 @@
       "filename_pattern": "{name} - Resume",
       "tag": "unverified",
       "source": "https://www.reddit.com/r/jobs/comments/1c1mqp0/ - u/SheetsGiggles, self-described former Fortune 100 recruiter; https://sheetsresume.com/advice",
-      "note": "The source states plainly that a summary or objective 'will be skipped, and it's space that can be used better', which DIRECTLY CONTRADICTS the verified research above that places Summary second in both orders. Both are credible and they are not reconciled here. Tagged unverified because it is a single source, and because it conflicts with a verified rule rather than because it was not read carefully. Interests placement and the one-line form are that source's own recommendations, not independent findings."
+      "note": "The source states plainly that a summary or objective 'will be skipped, and it's space that can be used better'. Adopted as the default template per decision (2). Source remains unverified (single source)."
     },
     "why_not_merge": "The two templates are kept separate on purpose. Silently dropping Summary would override a verified, cited rule with one source's opinion; the honest resolution is to let the user pick, and to record the disagreement where the renderer can see it."
   },
@@ -159,6 +159,7 @@
     "participated in",
     "excellent communication skills"
   ],
+  "banned_phrases_note": "The 23 banned phrases above came from Stage 0 research (RULES.md), NOT from the sheetsresume.com guide. The guide mentions avoiding 'fluff' and 'weak words' generally but does not publish a specific list.",
   "preferred_verbs": [
     "built", "designed", "implemented", "led", "shipped", "migrated", "automated", "reduced", "increased", "improved",
     "launched", "developed", "architected", "optimized", "debugged", "deployed", "integrated", "scaled", "measured",
@@ -175,7 +176,49 @@
     "tense": { "current_role": "present", "past_roles": "past", "tag": "verified" },
     "quantification": "report real scale/metrics only (users, latency, cost, time, revenue, team size); if no number, state scope of work. NEVER invent numbers.",
     "summary": { "lines": [2, 4], "words": [50, 100], "tag": "verified" },
-    "low_metric_verbs_banned_in_openers": ["responsible for", "helped", "assisted", "participated", "worked on various"]
+    "low_metric_verbs_banned_in_openers": ["responsible for", "helped", "assisted", "participated", "worked on various"],
+    "company_overview_bullet": {
+      "optional": true,
+      "description": "Lead with a bullet about your employer's scale (Fortune 500, revenue, users, employees) to anchor the screener on big numbers. Text comes ONLY from user input — never from model knowledge. Interview mode asks for it.",
+      "source": "https://sheetsresume.com/advice/company-overview-bullets-on-resume",
+      "tag": "unverified"
+    },
+    "strongest_bullet_first": {
+      "description": "The first bullet under each role should be the most impressive (the 'anchor'). If a weaker bullet leads, warn the user.",
+      "source": "https://sheetsresume.com/advice/how-much-should-i-tailor-my-resume-for-each-job-application",
+      "tag": "unverified",
+      "warning": true
+    }
+  },
+  "tailoring": {
+    "description": "Light tailoring only. You may change: (a) job title — only with an explicit confirm dialog; (b) the anchor/first bullet; (c) the order of skills. Do NOT rewrite the whole resume per application. Do NOT misrepresent yourself.",
+    "source": "https://sheetsresume.com/advice/how-much-should-i-tailor-my-resume-for-each-job-application",
+    "tag": "unverified"
+  },
+  "file_naming": {
+    "pattern": "{name} - Resume",
+    "forbidden_warn_only": ["year", "company name", "role/industry name", "Final", "v2", "parentheses"],
+    "source": "https://sheetsresume.com/advice/how-should-i-name-my-resume-file",
+    "tag": "unverified"
+  },
+  "gpa": {
+    "include_if": "GPA >= 87.5% of scale (equivalent to 3.5/4.0 or 8.75/10 CGPA)",
+    "cutoff_years_post_college": 2,
+    "india": "keep CGPA format, report both CGPA/10 and converted /4.0",
+    "source": "https://sheetsresume.com/advice/should-i-put-my-gpa-on-my-resume",
+    "tag": "unverified"
+  },
+  "contact_rules": {
+    "no_references_line": true,
+    "no_references_note": "Do not include 'References available upon request' or a references section. Provide references separately if explicitly asked.",
+    "photo_default": "omit",
+    "photo_note": "No photo on resume by default (US/UK/CA/AU/NZ/IE anti-discrimination laws). Only include if a country explicitly requires it.",
+    "portfolio_in_contact": true,
+    "portfolio_note": "Portfolio link goes in contact links at the top, alongside name/email/phone/location. Hyperlink descriptive text ('Portfolio', 'GitHub').",
+    "linkedin_default": "omit",
+    "linkedin_note": "Omit LinkedIn by default. It opens the application to visual bias/discrimination. Exception: executive-level with strong, current profile.",
+    "source": "https://sheetsresume.com/advice/should-i-have-references-on-my-resume; https://sheetsresume.com/advice/should-i-put-a-picture-of-myself-on-my-resume; https://sheetsresume.com/advice/where-to-link-your-portfolio-on-your-resume; https://sheetsresume.com/advice/should-i-put-my-linkedin-url-on-my-resume",
+    "tag": "unverified"
   },
   "tech_role_rules": {
     "projects_must_have": ["problem", "tech_stack", "your_role", "result_or_metric", "live_link"],
