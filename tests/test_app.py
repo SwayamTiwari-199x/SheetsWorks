@@ -32,9 +32,16 @@ def test_openapi_schema_builds() -> None:
 
 
 def test_stage3_exposes_only_its_own_routes() -> None:
-    """Stage 1+2+3 scope. Guards against speculative endpoints creeping back.
+    """Scope guard against speculative endpoints creeping back.
 
-    Stage 3 adds exactly one API route, POST /preview, because the live preview
+    Deliberately widened in Stage 5b by two routes, `GET /versions` and
+    `DELETE /versions/{version_id}`. Snapshots had been write-only: you could
+    make one and never list or remove it, which made the File Manager's claim to
+    be a version browser untrue. "Six routes" was a number to preserve, not a
+    property worth keeping -- but the test stays an exact set, so the next
+    endpoint cannot appear without this failing.
+
+    Stage 3 added exactly one API route, POST /preview, because the live preview
     must render the profile the browser currently holds rather than wait for
     the debounced autosave. Everything else (assist, jd, tailor, validate,
     applications) belongs to a later stage and must stay absent.
@@ -45,6 +52,7 @@ def test_stage3_exposes_only_its_own_routes() -> None:
         "/health",
         "/profile",
         "/versions",
+        "/versions/{version_id}",
         "/versions/from-profile",
         "/export/{version_id}",
         "/preview",

@@ -408,8 +408,39 @@ def test_preview_pane_has_a_visible_fallback() -> None:
     assert "previewFallback" in app_js
     assert "previewOpen" in app_js
     assert "openLink.setAttribute('href', url)" in app_js
-    assert "fallback.hidden = false" in app_js, (
+    assert "showFallback(fallback, true)" in app_js, (
         "a failed preview must say so rather than showing an empty frame"
+    )
+
+
+def test_the_fallback_is_hidden_by_display_not_by_the_hidden_property() -> None:
+    """Regression, and the reason `hidden` is not used on its own anywhere here.
+
+    `hidden` contributes only a user-agent-level `[hidden] { display: none }`
+    rule. The fallback panel needs an inline `display:flex` to centre its
+    message, and an inline declaration outranks the UA stylesheet. So the panel
+    stayed painted on top of the PDF at all times, and every preview in the app
+    showed "The preview could not be shown in place" instead of the resume.
+
+    Nothing caught it because `element.hidden === true` was true the whole time:
+    the property said hidden and the pixels said otherwise.
+    """
+    app_js = read(APP_JS)
+    helper = app_js.split("function showFallback(", 1)[1][:600]
+    assert "node.style.display" in helper, (
+        "hiding must move `display`, which is what actually gets painted"
+    )
+    # Setting `hidden` alone anywhere near this panel brings the bug straight
+    # back, so forbid it.
+    body = app_js.split("function refreshPreview(", 1)[1][:2400]
+    assert "fallback.hidden" not in body, (
+        "do not set `.hidden` on the fallback -- it does not hide it"
+    )
+    assert "showFallback(fallback, false)" in body, (
+        "a successful render must hide the panel by display"
+    )
+    assert "showFallback(fallback, true)" in body, (
+        "a failed render must show it"
     )
 
 

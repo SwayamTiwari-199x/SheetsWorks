@@ -162,12 +162,12 @@ split, and the six-route surface are unchanged.
 
 Full sweep before the editor, at the user's request: the pytest suite, a
 100-check API sweep against a live server, and an 87-check browser harness that
-drives the real desktop. Two new artefacts, both under `out/` and both
+drives the real desktop. Two new artefacts, both under `tools/` and both
 deliberately **not** shipped:
 
-- `out/verify_api.py` — every route, both templates, all three export formats,
+- `tools/verify_api.py` — every route, both templates, all three export formats,
   the failure paths, the security headers, and filename-injection attempts.
-- `out/_verify.html` + `out/_verify.js`, driven by `out/run-ui-verify.ps1` —
+- `tools/_verify.html` + `tools/_verify.js`, driven by `tools/run-ui-verify.ps1` —
   opens every window, asserts on the real DOM, and exercises focus, z-order,
   minimise, maximise, the modal veil and Escape.
 
@@ -210,7 +210,7 @@ instead of the blob and the "open in a new tab" link pointed at the app.
 A verification run reported `GET /profile` missing `no-store` **after that had
 already been fixed**. The cause: a uvicorn left over from an earlier run still
 held the test port, so the script was talking to a build from before the fix and
-"reporting" a defect that no longer existed. `out/free-ports.ps1` now clears the
+"reporting" a defect that no longer existed. `tools/free-ports.ps1` now clears the
 range and refuses to run against a held port. A test that silently exercises the
 wrong build is worse than no test, because it invents problems.
 
@@ -222,19 +222,38 @@ synchronously before its async body, so a harness that dies early says so.
 
 ### Known gaps, stated plainly
 
-- **The editor does not exist yet.** The My Resume window holds a placeholder,
-  so nothing can be typed into it. That is Stage 5b, and it is the only reason
-  the editing flow has not been exercised end to end.
-- **There is no Export dialog yet.** Exports work through the API and have been
-  verified in all three formats across both templates, but there is no window
-  for them.
-- **Saved versions cannot be listed or reopened.** There is `POST /versions` and
-  `POST /versions/from-profile`, and nothing else — so a snapshot is
-  write-only, reachable only if you kept its id. The File Manager was going to
-  be a version browser; as built it browses *sections* instead, and the version
-  list needs an endpoint that does not exist. This is the first thing Stage 5b
-  should add.
+*Superseded by Stage 5b; kept because the closure of each is itself a record of
+what was wrong. The three below were the whole of the remaining gap list when 5b
+started, and all three are now closed.*
 
+- ~~**The editor does not exist yet.**~~ Closed in 5b part 1: `editor-model.js`
+  holds the rules as pure functions, `editor.js` draws the form from them, and
+  the harness types into it and reads the result back from the server.
+- ~~**There is no Export dialog yet.**~~ Closed in 5b part 2: format listbox,
+  the personal-details decision, live filename, OK/Cancel -- and the auto-height
+  bug that had been clipping those buttons off the dialog.
+- ~~**Saved versions cannot be listed or reopened.**~~ Partly closed in 5b part 2:
+  `GET /versions` lists them and `DELETE /versions/{id}` removes them, which is
+  what made the File Manager's Versions tab real. **Still open:** there is no
+  `GET /versions/{id}`, so a listed version still cannot be *reopened* -- only
+  exported or deleted. The File Manager shows a version's details from the
+  summary, which is enough to identify it and not enough to restore it. That
+  belongs to Stage 6, alongside tailoring, and the API verifier still carries it
+  as an explicit `KNOWN GAP` line so it cannot be forgotten.
+
+Remaining and genuinely open:
+
+- **Stage 4 (AI assist) cannot be verified end to end.** Gemini returns 403
+  "Your project has been denied access" for every 3.x model, and the 2.5 family
+  is closed to new accounts. The AI Resume Builder window reports this honestly
+  rather than pretending.
+- **The archived terminal UI is still served and still tested**
+  (`terminal.html`, `old-app.js`). It goes when the last of the design is
+  retired, together with `tests/test_terminal_flow.py`.
+- **The PDF's on-screen appearance is unverified.** Headless Chrome does not
+  rasterise PDFs into screenshots, so every preview screenshot is black
+  regardless of whether the app is correct. See the control experiment in
+  `tools/_pdfctl2.html`; closing this needs a headed browser.
 ### The freeze: reported by the user, and the worst bug so far
 
 Clicking **Sample Resume** froze the whole desktop. Mouse moved, the Start menu
@@ -346,6 +365,129 @@ the server to confirm it arrived. A form that renders correctly and does not sav
 is exactly the failure that got through in Stage 3.
 
 466 tests pass. 118 browser checks pass.
+
+### Stage 5b, part 2: the Export dialog and a version browser
+
+Both remaining gaps from part 1, plus two bugs the user found by using the app.
+
+#### Your three questions, answered in the code
+
+**"What is File Manager for?"** It was a browser for your resume's *sections*,
+described in this file as a version browser it was not. It is now both, chosen by
+a tab bar: **Resume** (sections and their entries, with counts from the model so
+the list cannot disagree with the editor) and **Versions** (saved snapshots, with
+Export and Delete). Creating a snapshot is the toolbar's Snapshot button, and it
+names the file after you, which is what the sheets convention expects.
+
+**"What is Sheetsworks?"** The app's name. It appears in the title bar, the Start
+menu's *About Sheetsworks*, and message box titles. It is a pun on "sheets" and
+nothing more. One rename in `app/static/win/app.js` and `README.md` changes it.
+
+**"Preview doesn't work."** It didn't, and not for the reason anyone would guess.
+The grey "the preview could not be shown in place" panel was set to `hidden`,
+which contributes only a user-agent-level `[hidden] { display: none }` rule — and
+the panel's own inline `display:flex` outranks that. So the panel was painted on
+top of the PDF at all times. Every preview showed the error message instead of
+your resume.
+
+`element.hidden === true` was true the whole time. The property said hidden; the
+pixels said otherwise. The harness now checks `getComputedStyle(...).display`
+*and* asks `document.elementFromPoint` what a pointer would actually hit.
+
+#### On the black preview in screenshots
+
+The preview window photographs as a black rectangle under
+`chrome --headless=new --screenshot`. That is **not** evidence of a defect, and
+the reason is recorded in `tools/_pdfctl2.html`:
+
+- `navigator.pdfViewerEnabled` is `true`, so the component is present;
+- a hand-written PDF as a `data:` URL photographs as a broken-document icon;
+- **the app's own exported PDF, served over plain HTTP with no blob and no
+  application JavaScript, photographs as a broken-document icon too.**
+
+Headless Chrome does not rasterise PDF content into screenshots at all. So the
+preview is verified by other means — the iframe's src is a real `blob:` URL built
+from the server's response, the status bar reports the page count and budget the
+server computed, nothing is painted over the frame, and the "open in a new tab"
+link resolves to the same blob. What I cannot verify here is the PDF's appearance
+on screen; that needs a headed browser.
+
+#### Two endpoints, added on purpose
+
+`GET /versions` and `DELETE /versions/{version_id}`. This breaks the
+"exactly six routes" test in `tests/test_app.py` and
+`tests/test_win95.py`, deliberately and with the reason written into both: six was
+a number that was true when written, and it stood for "the surface is minimal"
+rather than "the surface is right". Snapshots were write-only — you could make one
+and never list or remove it — and the File Manager's claim to be a version
+browser was false. Both lists remain **exact sets**, so the next endpoint still
+cannot appear unnoticed.
+
+`GET /versions` returns `VersionSummary`, not `Version`. `Version` requires
+`profile_snapshot`, which is the whole resume; a list of fifty snapshots must not
+ship fifty complete resumes. The database query does not read the `body` column at
+all, and the response is `no-store` because a snapshot's name is often a real
+person's name.
+
+#### Bugs found while finishing
+
+1. **`h: 'auto'` never worked.** `place(o.w, o.h === 'auto' ? 200 : o.h)` rewrote
+   `'auto'` to `200` *before* the code tested `geom.h === 'auto'` — a comparison
+   that could never be true. Every auto-height dialog was silently locked to
+   200px. It went unnoticed because message boxes are short, and a short dialog
+   clipped at 200px just looks like a dialog. The Export dialog's content finally
+   exceeded 200px and pushed **OK and Cancel outside the window**: a dialog you
+   could neither confirm nor cancel. Asserting its `textContent` contained
+   "Cancel" passed the entire time.
+
+   The harness now sweeps every dialog for buttons lying outside its own frame,
+   and asks `elementFromPoint` whether a pointer could reach the OK button.
+
+2. **Clicking an overlapped window did not bring it forward.** `focusWindow` was
+   reachable from exactly three places: creating a window, dragging its title bar,
+   and restoring. So the only way to raise a buried window was to drag it. No test
+   caught it, because every test either opened a window (which focuses it) or
+   clicked a control that was already on top. Same lesson as the veil that covered
+   every modal: a control can exist, be focusable and respond, and still be
+   unusable. Now `pointerdown` anywhere in a window raises it — `pointerdown`
+   rather than `click`, so focus moves before the control's own handler runs.
+
+3. **`ORDER BY created_at DESC, id DESC` did not mean "newest first".**
+   `created_at` is a plain ISO *date*, so every snapshot from one afternoon shares
+   a value; ids are random hex, so same-day versions came back in an order that
+   varied with the data rather than with the time. Now `rowid DESC`, SQLite's
+   monotonic insertion counter.
+
+4. **The first `GET /versions` reported every version's template as `blank`.**
+   `template` lived inside the JSON body, which the endpoint deliberately did not
+   read — so it reported the default for every row. A File Manager showing
+   "Template: blank" above a version actually rendered from `sheets` is not a
+   rough edge, it is a lie about the user's own files. Fixed by promoting
+   `template` to a real column (with a migration, since `CREATE TABLE IF NOT
+   EXISTS` does nothing for an existing `resume.db`).
+
+5. **`Sheetsworks.ready`.** The harness waited for the editor *window* to exist
+   before seeding a profile, but `state.profile` does not settle until boot's
+   fetch returns — so boot then overwrote the seeded profile with `null`. That
+   surfaced as five failures reading like five unrelated bugs in the version list
+   and the preview. The app now publishes a readiness promise, resolved in a
+   `finally` because the `?open=` branch returns early and that is exactly the URL
+   screenshots use.
+
+#### The harnesses are now in the repository
+
+`out/` is gitignored, so the browser harness — which is what caught the preview
+overlay, the clipped dialog and the raise-on-click bug — had never been committed.
+Anyone else cloning this repo would have got none of it. The sources now live in
+`tools/` and are tracked; `out/` holds only generated artefacts.
+
+```
+tools\run-ui-verify.ps1 <port>   # 156 browser checks
+tools\verify_api.py <port>       # 110 API checks
+tools\shot.ps1 -Port N -Name X -Open editor
+tools\free-ports.ps1
+tools\_pdfctl2.html              # why preview screenshots are black
+```
 
 ### Security pass (tests in `tests/test_security.py`)
 DNS rebinding closed with `TrustedHostMiddleware`; over-nested JSON (~6KB of `[`) caused a 500 + traceback, now 422; invisible/control characters (NUL, U+202E, zero-width, bidi isolates, BOM, DEL) rejected naming the code point; list fields capped 60/12/20. Security headers on every response with **two CSPs** — `default-src 'none'` for API routes, `default-src 'self'` for the page (the strict API policy would otherwise have blanked the UI). Exports sent `no-store`. Verified **not** vulnerable with tests: SQL injection (queries parameterised), CORS absent by design, no secret in any response.

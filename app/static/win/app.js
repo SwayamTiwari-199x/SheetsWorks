@@ -116,6 +116,7 @@ const DESKTOP_ICONS = [
   { label: 'File Manager', icon: 'folder', run: () => openFileManager() },
   { label: 'Read Me',     icon: 'help',    run: () => openReadMe() },
   { label: 'Preview',     icon: 'find',    run: () => openPreview() },
+  { label: 'Export As',   icon: 'printer', run: () => openExport() },
   { label: 'Display',     icon: 'display', run: () => openDisplay() },
   { label: 'Sheetsworks', icon: 'computer', run: () => openAbout() },
 ];
@@ -322,20 +323,34 @@ function openDisplay() {
   });
 }
 
-/* ---- File Manager: sections and entries -------------------------------- */
+/* ---- File Manager: your resume, and its saved snapshots ----------------- */
+/* It has two modes, chosen by a tab bar rather than a menu, because both are
+   things you look at and the switch should cost no clicks:
+     Resume   -- the live profile: sections on the left, entries on the right.
+     Versions -- saved snapshots from GET /versions, with export and delete.
+   The Versions mode is why that endpoint exists. Without it snapshots were
+   write-only: you could make one and never see it again. */
+
+const FM_TABS = [['resume', 'Resume'], ['versions', 'Versions']];
+let fmMode = 'resume';
+let fmVersions = null;
 
 function openFileManager() {
   return once('fm', () => {
     const rec = W.createWindow({
-      id: 'fm', title: 'File Manager - My Resume', icon: 'folderOpen',
-      w: 560, h: 380,
+      id: 'fm', title: 'File Manager', icon: 'folderOpen',
+      w: 600, h: 400, minWidth: 460, minHeight: 300,
       menus: [
         { label: 'File', items: [
           { label: 'Open', accel: 'Enter', action: () => openEditor() },
+          { label: 'Export As...', accel: 'Ctrl+E', action: () => openExport() },
           { sep: true },
           { label: 'Close', accel: 'Alt+F4', action: () => W.close('fm') },
         ] },
         { label: 'View', items: [
+          { label: 'Resume', action: () => setFmMode('resume') },
+          { label: 'Versions', action: () => setFmMode('versions') },
+          { sep: true },
           { label: 'Read Me', action: openReadMe },
           { label: 'Preview', action: openPreview },
         ] },
@@ -343,69 +358,235 @@ function openFileManager() {
       ],
       toolbar: [
         { icon: 'folderOpen', label: 'Open', action: () => openEditor() },
-        { icon: 'notepad',   label: 'Read Me', action: openReadMe },
+        { icon: 'save',       label: 'Snapshot', action: () => fmSnapshot() },
+        { icon: 'printer',    label: 'Export', action: () => openExport() },
         { sep: true },
-        { icon: 'printer',   label: 'Export', action: () => openEditor() },
+        { icon: 'notepad',    label: 'Read Me', action: openReadMe },
       ],
       statusText: 'Ready',
     });
 
-    const row = el('div', 'split');
-    row.style.height = '100%';
+    const wrap = el('div', 'well-fill');
 
-    // The "C:\" drive dropdown, repurposed as the section list.
-    const left = el('div', 'listbox');
-    left.style.width = '150px';
-    left.style.flex = '0 0 150px';
-    (state.profile ? ['contact', 'summary', 'interests', 'experience', 'projects',
-                      'skills', 'education', 'achievements'] : ['(no profile yet)'])
-      .forEach((s) => {
-        const item = el('div', 'listbox-row', s);
-        item.setAttribute('data-section', s);
-        left.appendChild(item);
-      });
+    const tabs = el('div', 'fm-tabs');
+    tabs.setAttribute('role', 'tablist');
+    FM_TABS.forEach(([key, label]) => {
+      const b = el('button', 'tab', label);
+      b.type = 'button';
+      b.setAttribute('role', 'tab');
+      b.setAttribute('data-mode', key);
+      b.addEventListener('click', () => setFmMode(key));
+      tabs.appendChild(b);
+    });
+    wrap.appendChild(tabs);
 
-    // The file list.
+    const row = el('div', 'split fm-split');
+
+    const left = el('div', 'listbox fm-left');
+    left.setAttribute('data-role', 'fm-left');
     const right = el('div', 'listbox grow');
-    right.setAttribute('data-role', 'entries');
-    right.appendChild(el('div', 'listbox-row dim', 'Select a section on the left.'));
-
+    right.setAttribute('data-role', 'fm-right');
     row.appendChild(left);
     row.appendChild(right);
-    rec.body.appendChild(row);
+    wrap.appendChild(row);
 
-    left.addEventListener('click', () => {
-      const picked = left.querySelector('[aria-selected="true"]');
-      if (!picked) return;
-      left.querySelectorAll('.listbox-row').forEach((r) => {
-        r.setAttribute('aria-selected', String(r === picked));
-      });
-      const section = picked.getAttribute('data-section');
-      right.textContent = '';
-      const value = state.profile ? state.profile[section] : null;
-      const items = value === undefined || value === null ? []
-        : (Array.isArray(value) ? value : [value]);
-      if (!items.length) {
-        right.appendChild(el('div', 'listbox-row dim', 'Empty. Use My Resume to add something.'));
-      } else {
-        items.forEach((item, i) => {
-          const r = el('div', 'listbox-row',
-            describeEntry(section, item, i));
-          right.appendChild(r);
-        });
-      }
-      W.setStatus('fm', section + ': ' + items.length + ' item(s)', 'right');
+    rec.body.appendChild(wrap);
+    rec.el.addEventListener('keydown', (ev) => {
+      if (ev.ctrlKey && ev.key === 'e') { ev.preventDefault(); openExport(); }
     });
 
-    // A friendly empty state instead of a blank list.
-    if (!state.profile) {
-      W.setStatus('fm', 'No profile loaded', 'right');
-    } else {
-      W.setStatus('fm', state.profile.contact
-        && state.profile.contact.name || '(no name)', 'right');
-    }
+    paintFm(rec);
+    loadVersions(rec);
     return rec;
   });
+}
+
+function setFmMode(mode) {
+  fmMode = mode;
+  const rec = W.windows.get('fm');
+  if (rec) {
+    paintFm(rec);
+    if (mode === 'versions' && fmVersions === null) loadVersions(rec);
+  }
+}
+
+/* Paint the tab strip and the currently-selected pane. */
+function paintFm(rec) {
+  rec.el.querySelectorAll('.fm-tabs .tab').forEach((t) => {
+    const on = t.getAttribute('data-mode') === fmMode;
+    t.setAttribute('aria-selected', String(on));
+    if (on) t.classList.add('active');
+    else t.classList.remove('active');
+  });
+  const left = rec.el.querySelector('[data-role="fm-left"]');
+  const right = rec.el.querySelector('[data-role="fm-right"]');
+  left.textContent = '';
+  right.textContent = '';
+  if (fmMode === 'resume') paintFmResume(left, right);
+  else paintFmVersions(left, right);
+  rec.title.textContent = fmMode === 'resume'
+    ? 'File Manager - My Resume'
+    : 'File Manager - Versions';
+}
+
+/* Resume mode: sections, then their entries. Counts come from the model so the
+   list cannot disagree with what the editor would show. */
+function paintFmResume(left, right) {
+  right.appendChild(el('div', 'listbox-row dim', 'Select a section on the left.'));
+  if (!state.profile) {
+    left.appendChild(el('div', 'listbox-row dim', '(no profile yet)'));
+    W.setStatus('fm', 'No profile loaded', 'right');
+    return;
+  }
+  const M = window.EditorModel;
+  M.ORDER.forEach((section) => {
+    const spec = M.spec(section);
+    const n = M.count(state.profile, section);
+    const item = el('div', 'listbox-row',
+      spec.label + (n ? '  (' + n + ')' : ''));
+    item.setAttribute('data-section', section);
+    if (!n) item.classList.add('dim');
+    left.appendChild(item);
+  });
+  left.addEventListener('click', onFmSectionClick);
+  W.setStatus('fm',
+    (state.profile.contact && state.profile.contact.name) || '(no name)', 'right');
+}
+
+function onFmSectionClick(ev) {
+  const picked = ev.target.closest('.listbox-row[data-section]');
+  if (!picked) return;
+  const left = ev.currentTarget;
+  left.querySelectorAll('.listbox-row').forEach((r) => {
+    r.setAttribute('aria-selected', String(r === picked));
+  });
+  const right = left.parentElement.querySelector('[data-role="fm-right"]');
+  const section = picked.getAttribute('data-section');
+  right.textContent = '';
+  const value = state.profile ? state.profile[section] : null;
+  const items = value === undefined || value === null ? []
+    : (Array.isArray(value) ? value : [value]);
+  if (!items.length) {
+    right.appendChild(el('div', 'listbox-row dim',
+      'Empty. Use My Resume to add something.'));
+  } else {
+    items.forEach((item, i) => right.appendChild(
+      el('div', 'listbox-row', describeEntry(section, item, i))));
+  }
+  W.setStatus('fm', section + ': ' + items.length + ' item(s)', 'right');
+}
+
+/* Versions mode. */
+function paintFmVersions(left, right) {
+  if (fmVersions === null) {
+    left.appendChild(el('div', 'listbox-row dim', 'Loading...'));
+    return;
+  }
+  if (!fmVersions.length) {
+    left.appendChild(el('div', 'listbox-row dim', '(no snapshots yet)'));
+    right.appendChild(el('div', 'listbox-row dim',
+      'Use Snapshot in the toolbar to save the current resume as a version.'));
+    W.setStatus('fm', 'No saved versions', 'right');
+    return;
+  }
+  fmVersions.forEach((v, i) => {
+    const item = el('div', 'listbox-row', v.name + '   ' + v.created_at);
+    item.setAttribute('data-version', v.id);
+    item.setAttribute('data-index', String(i));
+    left.appendChild(item);
+  });
+  left.addEventListener('click', onFmVersionClick);
+  right.appendChild(el('div', 'listbox-row dim',
+    'Select a version to export or delete it.'));
+  W.setStatus('fm', fmVersions.length + ' version(s)', 'right');
+}
+
+function onFmVersionClick(ev) {
+  const picked = ev.target.closest('.listbox-row[data-version]');
+  if (!picked) return;
+  const left = ev.currentTarget;
+  left.querySelectorAll('.listbox-row').forEach((r) => {
+    r.setAttribute('aria-selected', String(r === picked));
+  });
+  const right = left.parentElement.querySelector('[data-role="fm-right"]');
+  const v = fmVersions[Number(picked.getAttribute('data-index'))];
+  right.textContent = '';
+  [['Name', v.name], ['Saved', v.created_at], ['Template', v.template],
+   ['Job description', v.jd_id || '(none linked)'], ['Version id', v.id]]
+    .forEach(([k, val]) => {
+      const row = el('div', 'listbox-row');
+      row.appendChild(el('span', 'fm-key', k + ':'));
+      row.appendChild(el('span', 'fm-val', String(val)));
+      right.appendChild(row);
+    });
+  const bar = el('div', 'fm-actions');
+  const exp = el('button', 'btn default', 'Export As...');
+  exp.type = 'button';
+  exp.addEventListener('click', () => openExport(v.id, v.name));
+  const del = el('button', 'btn', 'Delete');
+  del.type = 'button';
+  del.addEventListener('click', async () => {
+    const answer = await W.messageBox({
+      title: 'Delete Version', icon: 'warning',
+      heading: 'Delete "' + v.name + '"?',
+      message: 'A saved version cannot be brought back once it is gone.',
+      buttons: ['Delete', 'Cancel'],
+    });
+    if (answer !== 'Delete') return;
+    await W.working('fm', 'Deleting...', async () => {
+      const res = await api('/versions/' + encodeURIComponent(v.id), { method: 'DELETE' });
+      if (!res.ok) throw new Error('delete failed: HTTP ' + res.status);
+    });
+    fmVersions = null;
+    const rec = W.windows.get('fm');
+    if (rec) { await loadVersions(rec); paintFm(rec); }
+    W.setStatus('fm', 'Deleted ' + v.name, 'right');
+  });
+  bar.appendChild(exp);
+  bar.appendChild(del);
+  right.appendChild(bar);
+  W.setStatus('fm', v.name, 'right');
+}
+
+/* Fetch the list. A failure is reported in the pane rather than swallowed --
+   an empty list that is really a failed request is indistinguishable from an
+   empty database, and only one of those is true. */
+async function loadVersions(rec) {
+  fmVersions = null;
+  try {
+    const res = await api('/versions');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    fmVersions = await res.json();
+  } catch (err) {
+    fmVersions = [];
+    W.setStatus('fm', 'Could not load versions: ' + err.message, 'right');
+  }
+  if (W.windows.get('fm') === rec) paintFm(rec);
+}
+
+/* Snapshot the live profile. Naming it after the person is what the sheets
+   convention expects, so that is the default rather than "current". */
+async function fmSnapshot() {
+  if (!state.profile || !state.profile.contact || !state.profile.contact.name) {
+    await W.messageBox({
+      title: 'Snapshot', icon: 'warning', heading: 'Nothing to snapshot',
+      message: 'Fill in your name in My Resume first -- it names the file.',
+      buttons: ['OK'],
+    });
+    return;
+  }
+  const name = state.profile.contact.name + ' Resume';
+  await W.working('fm', 'Saving a version...', () =>
+    api('/versions/from-profile?name=' + encodeURIComponent(name)
+        + '&template=' + encodeURIComponent(state.template),
+        { method: 'POST' }));
+  fmVersions = null;
+  const rec = W.windows.get('fm');
+  if (rec) {
+    await loadVersions(rec);
+    setFmMode('versions');
+  }
+  W.setStatus('fm', 'Saved "' + name + '"', 'right');
 }
 
 function describeEntry(section, item, i) {
@@ -419,6 +600,159 @@ function describeEntry(section, item, i) {
   if (item.text) bits.push(String(item.text).slice(0, 60));
   if (item.items) bits.push('[' + item.items.join(', ') + ']');
   return (i + 1) + '.  ' + (bits.join('  |  ') || '(no details)');
+}
+
+/* ---- Export As ---------------------------------------------------------- */
+/* The reference image's Open dialog, with the dummy text swapped for something
+   that matters: whether your date of birth and address go on the page. That is
+   a real decision per export, not a per-application setting, so it lives here. */
+
+const EXPORT_FORMATS = [
+  ['pdf', 'PDF Document (*.pdf)'],
+  ['docx', 'Word Document (*.docx)'],
+  ['txt', 'Plain Text (*.txt)'],
+];
+
+function openExport(versionId, versionName) {
+  let fmt = 'pdf';
+  let personal = false;
+
+  const dlg = W.createWindow({
+    id: 'export', dialog: true, modal: true,
+    title: 'Export As', icon: 'printer',
+    w: 420, h: 'auto', status: false, minimisable: false, resizable: false,
+    onClose: () => true,
+  });
+
+  const label = el('p', 'ed-blurb',
+    versionId
+      ? 'Export the saved version "' + versionName + '".'
+      : 'Save the current resume as a new version, then export it.');
+  dlg.body.appendChild(label);
+
+  const box = el('div', 'groupbox');
+  box.appendChild(el('span', 'groupbox-legend', 'Save as type'));
+  const list = el('div', 'listbox ed-formats');
+  list.setAttribute('role', 'listbox');
+  list.setAttribute('data-role', 'formats');
+  EXPORT_FORMATS.forEach(([key, text]) => {
+    const row = el('div', 'listbox-row', text);
+    row.setAttribute('role', 'option');
+    row.setAttribute('data-fmt', key);
+    row.setAttribute('aria-selected', String(key === fmt));
+    row.addEventListener('click', () => {
+      fmt = key;
+      list.querySelectorAll('.listbox-row').forEach((r) => {
+        r.setAttribute('aria-selected', String(r.getAttribute('data-fmt') === fmt));
+      });
+      showName();
+    });
+    list.appendChild(row);
+  });
+  box.appendChild(list);
+
+  const check = el('label', 'ed-check');
+  const cb = el('input');
+  cb.type = 'checkbox';
+  cb.id = 'exportPersonal';
+  check.appendChild(cb);
+  check.appendChild(el('span', null,
+    'Include personal details (address, date of birth)'));
+  check.appendChild(el('span', 'ed-hint',
+    'Off by default. Turning it on is right for a job application and wrong for anything you post publicly.'));
+  box.appendChild(check);
+  dlg.body.appendChild(box);
+
+  const nameRow = el('div', 'ed-name');
+  dlg.body.appendChild(nameRow);
+
+  function showName() {
+    nameRow.textContent = '';
+    nameRow.appendChild(el('span', 'fm-key', 'File name:'));
+    nameRow.appendChild(el('span', 'fm-val',
+      (versionName || suggestedName()) + EXPORT_FORMATS
+        .find(([k]) => k === fmt)[1].match(/\(([^)]+)\)$/)[1].replace('*', '')));
+  }
+  showName();
+
+  const bar = el('div', 'msg-buttons');
+  const okBtn = el('button', 'btn default', 'OK');
+  okBtn.type = 'button';
+  const cancelBtn = el('button', 'btn', 'Cancel');
+  cancelBtn.type = 'button';
+  bar.appendChild(okBtn);
+  bar.appendChild(cancelBtn);
+  dlg.body.appendChild(bar);
+
+  cancelBtn.addEventListener('click', () => { W.sfx.click(); W.close('export'); });
+  okBtn.addEventListener('click', async () => {
+    W.sfx.click();
+    okBtn.disabled = true;
+    try {
+      await doExport({ versionId, versionName, fmt, personal });
+      W.close('export');
+    } catch (err) {
+      okBtn.disabled = false;
+      W.setStatus('fm', 'Export failed: ' + err.message, 'right');
+    }
+  });
+
+  return dlg;
+}
+
+function suggestedName() {
+  const n = state.profile && state.profile.contact && state.profile.contact.name;
+  return (n ? n : 'resume').trim() + ' Resume';
+}
+
+/* Read the filename the server chose. The sheets convention lives server-side --
+   "Name Resume" for documents, bare "Name" for PDFs -- so guessing it here
+   would produce two different answers for the same file. */
+function filenameFromResponse(res, fallback) {
+  const cd = res.headers.get('Content-Disposition') || '';
+  const star = cd.match(/filename\*=UTF-8''([^;]+)/i);
+  if (star) { try { return decodeURIComponent(star[1]); } catch (_) { /* fall through */ } }
+  const plain = cd.match(/filename="?([^";]+)"?/i);
+  return plain ? plain[1] : fallback;
+}
+
+async function doExport({ versionId, versionName, fmt, personal }) {
+  let id = versionId;
+  if (!id) {
+    if (!state.profile) throw new Error('there is nothing to export yet');
+    const res = await api('/versions/from-profile?name='
+      + encodeURIComponent(versionName || suggestedName())
+      + '&include_personal_details=' + (personal ? 'true' : 'false')
+      + '&template=' + encodeURIComponent(state.template),
+      { method: 'POST' });
+    if (!res.ok) throw new Error('could not save a version (HTTP ' + res.status + ')');
+    const version = await res.json();
+    id = version.id;
+  }
+  const res = await api('/export/' + encodeURIComponent(id) + '?format='
+    + encodeURIComponent(fmt), { method: 'POST' });
+  if (!res.ok) {
+    // The server's own error text, which says which rule was broken.
+    let detail = 'HTTP ' + res.status;
+    try { const j = await res.json(); detail = j.detail || detail; } catch (_) { /* not json */ }
+    throw new Error(detail);
+  }
+  const blob = await res.blob();
+  const filename = filenameFromResponse(res, suggestedName() + '.' + fmt);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  // Revoke late: Safari and Firefox have been known to cancel the download if
+  // the URL disappears in the same tick as the click.
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+  W.setStatus('fm', 'Exported ' + filename + ' (' + blob.size + ' bytes)', 'right');
+  fmVersions = null;                    // a fresh version now exists
+  const rec = W.windows.get('fm');
+  if (rec) { await loadVersions(rec); paintFm(rec); }
 }
 
 /* ---- Preview: the real PDF -------------------------------------------- */
@@ -454,10 +788,15 @@ function openPreview() {
     // again be mistaken for a blank page.
     const fallback = document.createElement('div');
     fallback.id = 'previewFallback';
-    fallback.hidden = true;
     fallback.style.cssText = 'position:absolute;inset:0;display:flex;' +
       'flex-direction:column;gap:8px;align-items:center;justify-content:center;' +
       'background:#c0c0c0;text-align:center;padding:16px;';
+    // `hidden` on its own is NOT enough here. It only contributes a UA-level
+    // `[hidden] { display: none }`, and the inline `display:flex` above outranks
+    // it -- so the fallback sat on top of the PDF permanently and every preview
+    // showed "could not be shown" instead of the resume. showFallback() moves
+    // `display` explicitly, so what the property says is what is painted.
+    showFallback(fallback, false);
     const note = el('div', null,
       'The preview could not be shown in place. Your resume is fine -- this ' +
       'browser is refusing to display the PDF frame.');
@@ -474,6 +813,21 @@ function openPreview() {
     refreshPreview('preview');
     return rec;
   });
+}
+
+/* Show or hide the preview's escape-hatch panel.
+ *
+ * Deliberately does not rely on `hidden`. The UA stylesheet's
+ * `[hidden] { display: none }` loses to any inline `display`, and this panel
+ * needs an inline `display:flex` to centre its message. Relying on `hidden`
+ * therefore left it permanently painted over the PDF -- which is exactly what
+ * happened, and why the preview looked broken. Both the property and the
+ * computed style are set, and a test asserts the computed value.
+ */
+function showFallback(node, show) {
+  if (!node) return;
+  node.hidden = show;
+  node.style.display = show ? 'flex' : 'none';
 }
 
 async function refreshPreview(winId) {
@@ -505,11 +859,11 @@ async function refreshPreview(winId) {
     // resolved against the document, so the handler stored the page URL instead
     // of the blob and the fallback link pointed at the app.
     if (openLink) openLink.setAttribute('href', url);
-    if (fallback) fallback.hidden = true;
+    showFallback(fallback, false);
   } catch (err) {
     W.sfx.error();
     W.setStatus(winId, 'Preview failed', 'right');
-    if (fallback) fallback.hidden = false;
+    showFallback(fallback, true);
   } finally {
     W.setBusy(winId, false);
     W.progress(winId, 'main', 1);
@@ -633,6 +987,7 @@ function buildTaskbar() {
   menu.appendChild(W.startItem('Sample Resume', 'notepad', loadSample));
   menu.appendChild(W.startItem('File Manager', 'folder', openFileManager));
   menu.appendChild(W.startItem('Preview', 'find', openPreview));
+  menu.appendChild(W.startItem('Export As...', 'printer', openExport));
   menu.appendChild(W.startSeparator());
   menu.appendChild(W.startItem('Read Me', 'notepad', openReadMe));
   menu.appendChild(W.startItem('Display Properties', 'display', openDisplay));
@@ -701,7 +1056,39 @@ async function confirmExit() {
 
 /* ================================================================= boot === */
 
+/* Readiness, as a promise created before anything can ask for it.
+ *
+ * The desktop is visibly "up" the moment openEditor() puts a window on screen,
+ * but `state.profile` is not settled until the fetch in bootPromise() returns.
+ * Anything acting on the profile in that gap is working against a half-booted
+ * app and cannot tell -- the screenshot harness seeded a profile and then had
+ * boot overwrite it with null, which produced five failures that looked like
+ * four unrelated bugs.
+ *
+ * So the app publishes an honest signal: `Sheetsworks.ready`. Created here,
+ * exposed in the surface literal, resolved when the profile is loaded or known
+ * to be absent. The presence of a window is not that signal. */
+let markReady;
+const ready = new Promise(function (res) { markReady = res; });
+
 async function boot() {
+  try {
+    await bootPromise();
+  } catch (_) { /* failures are already reported through the status bar */ }
+}
+
+async function bootPromise() {
+  try {
+    await bootInner();
+  } finally {
+    // Must run on BOTH paths. The ?open= branch below returns early, and it is
+    // precisely the URL the screenshot harness uses -- so resolving only at the
+    // end of the function would hang every deep-linked page forever.
+    markReady();
+  }
+}
+
+async function bootInner() {
   state.tips = loadTips();
   state.template = store.get('rb.template', 'blank');
   if (state.template !== 'sheets') state.template = 'blank';
@@ -738,6 +1125,7 @@ async function boot() {
       editor: openEditor, fm: openFileManager, readme: openReadMe,
       preview: openPreview, display: openDisplay, about: openAbout,
       ai: openAiNotice, exit: confirmExit, sample: loadSample,
+      export: openExport,
     };
     let i = 0;
     const step = () => {
@@ -761,7 +1149,7 @@ async function boot() {
 function requestedWindows() {
   if (typeof location === 'undefined' || !location || !location.search) return [];
   const KNOWN = ['editor', 'fm', 'readme', 'preview', 'display', 'about',
-                  'ai', 'exit', 'sample'];
+                  'ai', 'exit', 'sample', 'export'];
   try {
     const raw = new URLSearchParams(location.search).get('open') || '';
     return raw.split(',').map((s) => s.trim()).filter((s) => KNOWN.indexOf(s) !== -1);
@@ -776,6 +1164,8 @@ window.Sheetsworks = {
   state,
   openEditor, openFileManager, openReadMe, openPreview, openDisplay,
   openAbout, openAiNotice, confirmExit, loadSample,
+  openExport, setFmMode, loadVersions,
+  ready,
 };
 
 if (document.readyState === 'loading') {

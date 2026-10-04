@@ -707,6 +707,74 @@ textarea.ed-input { height: 64px; }
 }
 .ed-count { font-size: 10px; color: var(--dim); text-align: right; }
 
+/* ============================================== file manager / export ==== */
+
+/* Tabs, the Win95 way: raised, and the selected one merged into the pane below
+   it by pulling its own border away. Not a real tab widget -- no arrow keys --
+   which is why each is a <button> with role="tab". */
+.fm-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 3px 3px 0;
+  flex: 0 0 auto;
+}
+.fm-tabs .tab {
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 12px 4px;
+  background: var(--face);
+  color: var(--ink);
+  border: none;
+  /* outset bevel, minus the bottom edge */
+  box-shadow: inset 1px 1px 0 var(--hilite),
+              inset -1px 0 0 var(--shadow),
+              inset 0 -1px 0 var(--shadow);
+  position: relative;
+  top: 1px;
+  cursor: default;
+}
+.fm-tabs .tab.active {
+  font-weight: bold;
+  padding: 4px 14px 5px;
+  top: 0;
+  box-shadow: inset 1px 1px 0 var(--hilite),
+              inset -1px 0 0 var(--shadow);
+}
+.fm-tabs .tab:active { /* a tab is not a button; it does not press in */ }
+
+.fm-split { flex: 1 1 auto; min-height: 0; gap: 4px; }
+.fm-left { flex: 0 0 190px; width: 190px; overflow-y: auto; }
+
+.fm-key { color: var(--dim); flex: 0 0 auto; }
+.fm-val { overflow-wrap: anywhere; }
+
+.fm-actions {
+  display: flex;
+  gap: 6px;
+  padding: 8px 4px 4px;
+}
+
+/* ---- Export dialog ---- */
+.ed-formats { height: 92px; margin-bottom: 10px; }
+.ed-check {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  align-items: start;
+  gap: 3px 6px;
+  font-size: 11px;
+  padding: 2px 0 4px;
+  cursor: default;
+}
+.ed-check input { margin: 1px 0 0; }
+.ed-check .ed-hint {
+  grid-column: 2;
+  color: var(--dim);
+  font-size: 10px;
+  line-height: 1.4;
+}
+.ed-name { font-size: 11px; padding: 6px 2px 2px; }
+.ed-name .fm-val { font-family: Fixedsys, "Courier New", monospace; }
+
 /* =========================================================== utilities === */
 
 .nowrap { white-space: nowrap; }

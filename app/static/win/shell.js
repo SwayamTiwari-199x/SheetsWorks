@@ -222,7 +222,16 @@ function place(w, h) {
 function createWindow(opts) {
   const o = opts || {};
   const id = o.id || ('win' + Math.random().toString(36).slice(2, 9));
-  const geom = o.rect || place(o.w, o.h === 'auto' ? 200 : o.h);
+  /* `h: 'auto'` means "size to the content". It has to be latched here, before
+     place() is called: the old line passed `o.h === 'auto' ? 200 : o.h` into
+     place() and then tested `geom.h === 'auto'`, which could never be true. So
+     every auto-height dialog was silently locked to 200px.
+     Nothing showed it for a long time because message boxes are short, and a
+     clipped short dialog just looks like a dialog. The Export dialog's content
+     finally exceeded 200px and its OK and Cancel buttons were pushed outside the
+     window -- a dialog you could neither confirm nor cancel. */
+  const autoH = o.h === 'auto';
+  const geom = o.rect || place(o.w, autoH ? 200 : o.h);
 
   const win = document.createElement('div');
   win.className = 'win' + (o.dialog ? ' dialog' : '');
@@ -238,7 +247,7 @@ function createWindow(opts) {
   // A dialog sizes to its content. Sizing it to a default 320px left a message
   // box with a button at the top and a third of a screen of empty grey under it,
   // which no dialog in the reference does.
-  if (geom.h === 'auto') win.style.height = 'auto';
+  if (autoH) win.style.height = 'auto';
   else win.style.height = geom.h + 'px';
 
   // ---- title bar
@@ -368,6 +377,7 @@ function createWindow(opts) {
   setTimeout(opened, 250);
 
   focusWindow(id);
+  raiseOnPointerDown(id, win);
   buildTaskButtons();
   sfx.open();
   return rec;
@@ -403,6 +413,21 @@ function syncVeil() {
   const anyModal = Array.from(wins.values()).some(
     (r) => r.modal && !r.minimised && !r.el.hidden);
   if (els.veil) els.veil.classList.toggle('on', anyModal);
+}
+
+/* Any click inside a window brings it to the front.
+ *
+ * Without this the only way to raise an overlapped window was to drag its title
+ * bar, because focusWindow() was reachable from exactly three places: creation,
+ * a drag, and restore. That is not how a desktop behaves -- and it was invisible
+ * to every test, because each test either opened a window (which focuses it) or
+ * clicked a control in a window that was already on top.
+ *
+ * pointerdown rather than click, because focus must move before the control's own
+ * handler runs, or the first click on a background window's button would act on a
+ * window the user had not yet raised. */
+function raiseOnPointerDown(id, win) {
+  win.addEventListener('pointerdown', () => focusWindow(id), true);
 }
 
 /* --------------------------------------------------------------- drag ---- */

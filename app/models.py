@@ -341,6 +341,22 @@ class Version(StrictModel):
     include_personal_details: bool = False
 
 
+class VersionSummary(StrictModel):
+    """One row of a version list -- deliberately NOT a Version.
+
+    `Version` requires `profile_snapshot`, which is the entire resume. Listing
+    twenty snapshots would ship twenty complete resumes to a listbox, and the
+    database query does not even read the column. A version browser needs the
+    index fields and nothing else, so that is what this carries.
+    """
+
+    id: str
+    name: str
+    template: str = "blank"
+    created_at: str = ""
+    jd_id: str | None = None
+
+
 class JobParsed(BaseModel):
     model_config = ConfigDict(extra="allow")
 

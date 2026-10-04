@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import db, rules
-from .models import Profile, Version
+from .models import Profile, Version, VersionSummary
 from .render import (
     MEDIA_TYPES,
     RENDERERS,
@@ -195,6 +195,42 @@ _MULTI_SPACE = re.compile(r"\s+")
 def _clean_filename(value: str) -> str:
     cleaned = _MULTI_SPACE.sub(" ", _SAFE_NAME.sub("_", value)).strip(" ._-")
     return cleaned or "resume"
+
+
+@app.get("/versions", response_model=list[VersionSummary])
+def list_versions(limit: int = Query(100, ge=1, le=500)) -> Response:
+    """Every stored version, newest first.
+
+    This exists because snapshots were write-only: the File Manager was
+    described as a version browser but had nothing to show. Adding an endpoint
+    deliberately breaks the "exactly six routes" test -- six was true when it was
+    written, and "the routes the app needs" is a better property to hold.
+
+    Returns summaries, not `Version`s, so a list of fifty snapshots does not
+    carry fifty complete resumes. Sent no-store like everything else that can
+    hold personal details, because a snapshot's `name` is often a real name.
+    """
+    rows = db.list_versions(limit=limit)
+    return Response(
+        content=json.dumps([VersionSummary.model_validate(row).model_dump(mode="json")
+                            for row in rows]),
+        media_type="application/json",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.delete("/versions/{version_id}", status_code=204)
+def delete_version(version_id: str) -> Response:
+    """Delete one version.
+
+    Snapshots are the user's own history and there is no undo in a database, so
+    this asks first (404 rather than 403 for a row that is not there, and 404 for
+    a row that belongs to nobody else is not expressible here -- there is only
+    ever one user's data in this build).
+    """
+    if not db.delete_version(version_id):
+        raise HTTPException(status_code=404, detail="no such version")
+    return Response(status_code=204)
 
 
 @app.post("/versions", response_model=Version, status_code=201)

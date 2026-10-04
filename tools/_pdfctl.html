@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<!--
+  A control experiment, not part of the app.
+
+  The Preview window shows a black rectangle in screenshots even though
+  navigator.pdfViewerEnabled is true. Two explanations fit:
+
+    a) the app is broken and the PDF never displays, or
+    b) Chrome's --screenshot does not capture the PDF viewer's own compositing
+       layer, so a perfectly good PDF photographs as black.
+
+  This page embeds a hand-written, known-good PDF as a data: URL with no app code
+  involved at all. If it also photographs black, (b) is the answer and the app is
+  fine. If it shows HELLO PDF, the app is at fault.
+
+  Kept in out/ and copied in only by the check that uses it.
+-->
+<html><head><meta charset="utf-8"><title>pdf control</title>
+<style>
+  body { background:#c0c0c0; font-family: monospace; margin:20px; }
+  iframe { width:600px; height:300px; border:3px solid #000080; background:#fff; }
+  #v { font-weight:bold; }
+</style></head>
+<body>
+<p>pdfViewerEnabled = <span id="v">?</span></p>
+<iframe id="f" title="control pdf"></iframe>
+<script src="/static/_pdfctl.js"></script>
+</body></html>

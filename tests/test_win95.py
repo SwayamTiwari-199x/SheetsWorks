@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 
 from app import rules
 from app.main import app
+from app.models import Profile, VersionSummary
 
 STATIC = __import__("pathlib").Path(__file__).resolve().parent.parent / "app" / "static"
 SHELL = (STATIC / "win" / "shell.js").read_text(encoding="utf-8")
@@ -24,6 +25,19 @@ EDITOR = (STATIC / "win" / "editor.js").read_text(encoding="utf-8")
 MODEL = (STATIC / "win" / "editor-model.js").read_text(encoding="utf-8")
 CSS = (STATIC / "win" / "win95.css").read_text(encoding="utf-8")
 HTML = (STATIC / "index.html").read_text(encoding="utf-8")
+
+
+def _sample_profile() -> dict:
+    """The smallest profile the API will accept.
+
+    Built from the real model rather than a literal, so it cannot drift out of
+    sync with the required fields -- which is the mistake this file exists to
+    catch elsewhere.
+    """
+    return Profile(
+        contact={"name": "Dusht Verma", "email": "dusht@example.com",
+                 "phone": "+91 98765 43210"},
+    ).model_dump(mode="json")
 
 
 # --- the shell ------------------------------------------------------------
@@ -100,11 +114,31 @@ def test_each_window_opens_and_is_reachable(window_id: str, opener: str) -> None
         f"{opener} is not reachable from the app surface"
 
 
-def test_the_file_manager_shows_sections_and_entries() -> None:
-    """The reference's folder tree and file list, mapped onto the resume."""
-    assert "data-section" in APP and "data-role', 'entries'" in APP
+def test_the_file_manager_is_a_resume_browser_and_a_version_browser() -> None:
+    """Both, chosen by a tab bar.
+
+    It started as a section browser and was described in PROGRESS.md as the
+    version browser it was not. Snapshots were write-only -- you could make one
+    and never list or remove it. The Versions tab is the fix, and it is why
+    GET /versions and DELETE /versions/{id} exist.
+    """
+    assert "data-section" in APP, "the Resume pane still needs its section rows"
+    assert "data-mode" in APP and "'versions'" in APP, "no Versions tab"
     for section in ("contact", "summary", "experience", "projects", "skills"):
-        assert f"'{section}'" in APP, f"the tree is missing {section}"
+        assert f"M.ORDER" in APP, (
+            "the section list must come from the model, not a hand-written "
+            "array that can disagree with the editor"
+        )
+    # Versions mode must list, select, export and delete -- not just display.
+    assert "GET /versions" in APP or "'/versions'" in APP
+    assert "data-version" in APP, "version rows are not addressable"
+    assert "fmSnapshot" in APP, "there must be a way to create a snapshot"
+    assert "doExport" in APP, "a listed version must be exportable"
+    assert "'/versions/' + encodeURIComponent(v.id)" in APP, (
+        "a listed version must be deletable"
+    )
+    # And a failure to load must not look like an empty database.
+    assert "Could not load versions" in APP
 
 
 def test_the_display_dialog_offers_both_templates() -> None:
@@ -130,8 +164,215 @@ def test_the_preview_window_keeps_its_escape_hatch() -> None:
     assert 'previewFallback' in APP
     assert 'previewOpen' in APP
     assert "openLink.setAttribute('href', url)" in APP
-    assert "fallback.hidden = false" in APP
-    assert "fallback.hidden = true" in APP
+    # Both states must go through showFallback(), never `hidden` directly --
+    # see test_the_fallback_is_hidden_by_display_not_by_the_hidden_property.
+    assert "showFallback(fallback, true)" in APP
+    assert "showFallback(fallback, false)" in APP
+
+
+def _strip_comments(src: str) -> str:
+    """Source with block and line comments removed.
+
+    Necessary because these tests assert on strings that also appear in the
+    comments explaining why they matter -- so a comment saying "the old code did
+    X" makes a test forbidding X fail on its own documentation.
+    """
+    src = re.sub(r"/\*.*?\*/", "", src, flags=re.DOTALL)
+    return re.sub(r"^\s*//.*$", "", src, flags=re.MULTILINE)
+
+
+def _function(src: str, signature: str, limit: int = 12000) -> str:
+    """The body of a top-level function, up to the next one.
+
+    Slicing a fixed number of characters was how three of these tests started
+    failing when an unrelated comment grew -- a test that breaks because
+    documentation got longer is a test measuring the wrong thing.
+    """
+    assert signature in src, f"{signature} not found"
+    rest = src.split(signature, 1)[1]
+    nxt = re.search(r"\n(?:function|const|let|var|\})", rest)
+    return rest[: nxt.start()] if nxt else rest[:limit]
+
+
+def test_auto_height_dialogs_really_auto_height() -> None:
+    """Regression.
+
+    `h: 'auto'` was passed through `place(o.w, o.h === 'auto' ? 200 : o.h)` and
+    then tested as `geom.h === 'auto'` -- which could never be true, because the
+    'auto' had already been replaced by 200. So every auto-height dialog was
+    silently locked to 200px tall.
+
+    It went unnoticed because message boxes are short, and a short dialog clipped
+    at 200px just looks like a dialog. The Export dialog's content finally
+    exceeded 200px and pushed its OK and Cancel buttons outside the window: a
+    dialog that could be neither confirmed nor cancelled. Asserting its
+    textContent contained "Cancel" passed the whole time.
+    """
+    code = _strip_comments(SHELL)
+    body = _function(code, "function createWindow(")
+    assert "const autoH = o.h === 'auto';" in body, (
+        "the auto flag must be latched BEFORE place() rewrites it"
+    )
+    assert "place(o.w, autoH ? 200 : o.h)" in body
+    assert "if (autoH) win.style.height = 'auto';" in body, (
+        "and it must be the flag that decides, not the post-place() value"
+    )
+    assert "geom.h === 'auto'" not in code, (
+        "this comparison is dead code that hides the bug -- remove it"
+    )
+
+
+def test_every_auto_height_dialog_can_be_confirmed_and_cancelled() -> None:
+    """A dialog with no button bar cannot be dismissed except by Escape, which
+    is not how a dialog is used.
+
+    This exists because the Export dialog did have buttons -- they were simply
+    outside the window, which no textContent assertion could see. The browser
+    harness now checks the geometry instead; this checks the buttons exist at
+    all, which is the cheaper half.
+    """
+    for src, name, fn in ((APP, "app.js", "function openExport("),
+                          (EDITOR, "editor.js", "function askText(")):
+        body = _function(_strip_comments(src), fn)
+        assert "h: 'auto'" in body, f"{name}:{fn} should size to its content"
+        assert re.search(r"el\('button'|\.btn|createElement\('button'|button\(", body), (
+            f"{name}:{fn} creates no buttons, so it can be neither confirmed "
+            "nor cancelled"
+        )
+        assert "Cancel" in body, f"{name}:{fn} offers no way out"
+
+
+def test_the_message_box_takes_its_buttons_from_the_caller() -> None:
+    """`messageBox` is the one dialog whose buttons vary, so it must not hardcode
+    a list -- it reads `o.buttons` with a single OK as the default.
+
+    Worth asserting separately because "offers no way out" and "hardcodes Cancel"
+    are the same failure for every other dialog and the opposite requirement here.
+    """
+    body = _function(_strip_comments(SHELL), "function messageBox(")
+    assert "o.buttons" in body, (
+        "the message box must take its button list from the caller"
+    )
+    assert "['OK']" in body, "and must default to a single OK"
+    assert re.search(r"\bbuttons\.(forEach|map)\b", body), (
+        "and must actually render the buttons it was given, not just read them"
+    )
+
+
+def test_the_app_publishes_a_readiness_signal() -> None:
+    """Regression. A window existing is not the app being ready.
+
+    `state.profile` does not settle until boot's `/profile` fetch returns. The
+    screenshot harness used "is the editor window there?" as its ready signal,
+    seeded a profile into the gap, and then had boot overwrite it with null --
+    which surfaced as five failures that read like five unrelated bugs in the
+    version list and the preview.
+
+    So the app publishes `Sheetsworks.ready`, and it must resolve on BOTH boot
+    paths. The `?open=` branch returns early, and it is exactly the URL the
+    harness uses for screenshots, so a `finally` is the whole difference between
+    that working and hanging forever.
+    """
+    assert "const ready = new Promise" in APP, "no readiness promise"
+    assert "ready," in APP, "readiness must be on the public surface"
+    assert "markReady()" in APP
+    inner = APP.split("async function bootPromise(", 1)[1][:400]
+    assert "finally" in inner, (
+        "readiness must resolve even when boot returns early for ?open="
+    )
+
+
+def test_a_version_list_reports_each_version_s_own_template() -> None:
+    """Regression, and a case of a shortcut looking reasonable.
+
+    `template` lives inside the JSON body column. The first version of
+    `GET /versions` deliberately did not read that column -- it holds the whole
+    resume, and reading fifty of them to print one word in a listbox is
+    indefensible. So it reported the default, `"blank"`, for every row.
+
+    That is worse than not reporting it: a File Manager showing "Template:
+    blank" above a version actually rendered from the `sheets` template is not a
+    rough edge, it is a lie about the user's own files. The fix was to promote
+    `template` to a real column, so the index carries it and the body is still
+    never touched.
+    """
+    with TestClient(app) as c:
+        c.put("/profile", json=_sample_profile())
+        a = c.post("/versions/from-profile?name=a&template=blank").json()
+        b = c.post("/versions/from-profile?name=b&template=sheets").json()
+        rows = {r["name"]: r["template"] for r in c.get("/versions").json()}
+        assert rows == {"a": "blank", "b": "sheets"}, rows
+        # And the snapshot itself is unchanged by the promotion.
+        assert b["template"] == "sheets"
+        assert a["template"] == "blank"
+
+
+def test_an_existing_database_gains_the_template_column(tmp_path) -> None:
+    """`CREATE TABLE IF NOT EXISTS` does nothing for a table that already
+    exists, so a developer with a resume.db from before this column would get an
+    OperationalError on the first write instead of a working app.
+
+    The migration is exercised by building the OLD table by hand and opening it,
+    which is the only way to actually test a migration.
+    """
+    import sqlite3
+
+    from app import db as dbmod
+
+    old = tmp_path / "old.db"
+    conn = sqlite3.connect(old)
+    # Exactly the Stage 2 schema: no `template` column.
+    conn.execute(
+        """CREATE TABLE versions (
+               id TEXT PRIMARY KEY, name TEXT NOT NULL, jd_id TEXT,
+               body TEXT NOT NULL, created_at TEXT NOT NULL)"""
+    )
+    conn.execute(
+        "INSERT INTO versions VALUES (?,?,?,?,?)",
+        ("v1", "an old version", None, "{}", "2026-01-01"),
+    )
+    conn.commit()
+    conn.close()
+
+    conn = sqlite3.connect(old)
+    try:
+        dbmod._add_column_if_missing(conn, "versions", "template",
+                                     "TEXT NOT NULL DEFAULT 'blank'")
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(versions)")}
+        assert "template" in cols, cols
+        # The existing row survives, with the default filled in.
+        row = conn.execute("SELECT name, template FROM versions").fetchone()
+        assert row == ("an old version", "blank"), row
+        # Running it twice is harmless.
+        dbmod._add_column_if_missing(conn, "versions", "template",
+                                     "TEXT NOT NULL DEFAULT 'blank'")
+        assert conn.execute("SELECT COUNT(*) FROM versions").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_clicking_anywhere_in_a_window_raises_it() -> None:
+    """Regression, and a whole class of them.
+
+    `focusWindow` was reachable from exactly three places: creating a window,
+    dragging its title bar, and restoring. So the only way to bring an overlapped
+    window forward was to drag it, and clicking its body or one of its controls
+    did nothing -- the click went to a window sitting behind others.
+
+    No test caught it because every test either opened a window (which focuses
+    it) or clicked a control that was already on top. Same lesson as the veil
+    that covered every modal: a control can exist, be focusable and respond, and
+    still be unusable.
+    """
+    assert "raiseOnPointerDown" in SHELL
+    assert "raiseOnPointerDown(id, win);" in SHELL, (
+        "the listener must actually be attached when a window is created"
+    )
+    helper = SHELL.split("function raiseOnPointerDown(", 1)[1][:700]
+    assert "pointerdown" in helper, (
+        "pointerdown, not click: focus must move before the control's own handler"
+    )
+    assert "focusWindow(id)" in helper
 
 
 def test_the_ai_window_says_why_it_is_empty() -> None:
@@ -370,13 +611,93 @@ def test_icons_are_parsed_not_assigned() -> None:
     assert "createElementNS" in SHELL, "and must fall back rather than crash"
 
 
-def test_the_route_surface_did_not_grow() -> None:
+def test_the_route_surface_is_exactly_what_the_app_uses() -> None:
+    """Renamed from `..._did_not_grow`, which is no longer the property worth
+    holding.
+
+    "Exactly six routes" was true when written and became a false comfort: it
+    said the surface was minimal, not that it was right. Adding `GET /versions`
+    and `DELETE /versions/{version_id}` broke it -- correctly. Snapshots were
+    write-only, so the File Manager could not be the version browser it claimed
+    to be, and there was no way to remove one.
+
+    The list is now pinned to what the app actually calls, so an endpoint cannot
+    appear or vanish unnoticed. It is still an exact set: this is not a test that
+    was loosened to make a change pass.
+    """
     with TestClient(app) as c:
         paths = set(c.get("/openapi.json").json()["paths"])
     assert paths == {
-        "/health", "/profile", "/versions", "/versions/from-profile",
+        "/health", "/profile",
+        "/versions", "/versions/{version_id}", "/versions/from-profile",
         "/export/{version_id}", "/preview",
     }
+
+
+def test_the_version_list_carries_no_profile_snapshot() -> None:
+    """A list of fifty snapshots must not ship fifty complete resumes.
+
+    `VersionSummary` exists only for this: `Version` requires
+    `profile_snapshot`, which is the whole resume. The endpoint also does not
+    read the `body` column at all, so a version list never touches personal
+    details it has no use for.
+    """
+    assert VersionSummary is not None
+    with TestClient(app) as c:
+        assert "profile_snapshot" not in VersionSummary.model_fields
+        assert "name" in VersionSummary.model_fields
+        assert "created_at" in VersionSummary.model_fields
+        c.put("/profile", json=_sample_profile())
+        created = c.post("/versions/from-profile?name=one")
+        assert created.status_code == 201
+        listed = c.get("/versions")
+        assert listed.status_code == 200
+        assert listed.headers.get("Cache-Control") == "no-store"
+        rows = listed.json()
+        assert len(rows) == 1
+        assert rows[0]["name"] == "one"
+        assert rows[0]["id"] == created.json()["id"]
+        assert "profile_snapshot" not in rows[0]
+        # The name on a snapshot is often a real person's name, so no-store.
+        assert "contact" not in rows[0]
+
+
+def test_a_version_can_be_deleted_and_deleting_it_twice_is_a_404() -> None:
+    with TestClient(app) as c:
+        c.put("/profile", json=_sample_profile())
+        created = c.post("/versions/from-profile?name=temporary").json()
+        assert len(c.get("/versions").json()) == 1
+        assert c.delete(f"/versions/{created['id']}").status_code == 204
+        assert c.get("/versions").json() == []
+        # Second delete must not pretend to succeed.
+        assert c.delete(f"/versions/{created['id']}").status_code == 404
+        assert c.delete("/versions/does-not-exist").status_code == 404
+
+
+def test_the_version_list_is_newest_first() -> None:
+    """`created_at` is a plain ISO date, so several snapshots taken on one day
+    would come back in arbitrary order. A browser that reshuffles on reload is
+    worse than one that is merely unsorted, so the id breaks the tie."""
+    with TestClient(app) as c:
+        c.put("/profile", json=_sample_profile())
+        ids = [c.post("/versions/from-profile?n=1").json()["id"],
+               c.post("/versions/from-profile?n=2").json()["id"],
+               c.post("/versions/from-profile?n=3").json()["id"]]
+        listed = [row["id"] for row in c.get("/versions").json()]
+        assert listed == list(reversed(ids)), (listed, ids)
+
+
+def test_the_route_surface_limit_is_bounded() -> None:
+    """A GET list that ignores its limit is a way to dump the whole table into
+    one response."""
+    with TestClient(app) as c:
+        c.put("/profile", json=_sample_profile())
+        for i in range(5):
+            c.post(f"/versions/from-profile?n={i}")
+        assert len(c.get("/versions?limit=2").json()) == 2
+        assert len(c.get("/versions?limit=500").json()) == 5
+        assert c.get("/versions?limit=0").status_code == 422
+        assert c.get("/versions?limit=9999").status_code == 422
 
 
 def test_every_window_record_property_that_is_read_is_also_written() -> None:
@@ -618,7 +939,7 @@ def test_the_opening_animation_never_owns_the_resting_state() -> None:
     `close()` already had a timeout fallback for exactly this reason; the open
     path did not, which is why one was found by looking and the other was not.
     """
-    body = SHELL.split("function createWindow(", 1)[1][:6000]
+    body = SHELL.split("function createWindow(", 1)[1][:12000]
     assert "win.classList.add('opening')" in body
     assert "animationend" in body
     assert "setTimeout(opened" in body, (
