@@ -308,10 +308,9 @@ def test_live_acceptance_1_and_2() -> None:
 
 
 @pytest.mark.live
-def test_live_acceptance_3_fact_guard() -> None:
-    """Acceptance 3: feed a prompt that tempts invention; output contains no
-    digits not in the input. Runs with the production fact_guard, not the LLM's
-    opinion.
+def test_live_acceptance_3_vague_input_returns_questions() -> None:
+    """Acceptance 3: vague input returns clarifying questions, not invented
+    bullets. Runs against the real provider.
     """
     import os
     if not os.getenv("RUN_LIVE_LLM"):
@@ -329,15 +328,13 @@ def test_live_acceptance_3_fact_guard() -> None:
     from app import config
     config.get_settings.cache_clear()
 
-    from app.assist import fact_guard, write_bullets
+    from app.assist import ask_clarifying
 
     prompt = "did stuff with the backend, it was good"
-    result = write_bullets("experience", prompt)
-    output = "\n".join(result.bullets)
-    problems = fact_guard(output, prompt)
+    result = ask_clarifying("experience", prompt)
     print(f"\n--- ACCEPTANCE 3 ---")
     print(f"Input:  {prompt}")
-    print(f"Output: {output}")
-    print(f"Fact guard: {problems or 'clean'}")
-    assert not any("invented digits" in p for p in problems), "Acceptance 3 failed"
+    print(f"Questions: {result.questions}")
+    print(f"Entries: {result.entries}")
+    assert result.questions, "Acceptance 3 failed: vague input must return questions, not empty"
 

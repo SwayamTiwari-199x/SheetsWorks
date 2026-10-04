@@ -12,6 +12,8 @@ WRITER RULES (from the guide):
 - Varied verbs required
 - Tense: current role = present, past roles = past
 - Quantification: report real scale/metrics only (users, latency, cost, time, revenue, team size); NEVER invent numbers
+- One bullet per distinct fact. Do not write three variants of the same achievement.
+- If you want to offer alternatives, prefix them clearly: "Alternative 1: ...", "Alternative 2: ..."
 
 EXAMPLE SLOT TEMPLATES (structure only, no real facts — every bracket must be filled from the user's input):
 - "Built [what] using [tool], cutting [metric] from [before] to [after]"

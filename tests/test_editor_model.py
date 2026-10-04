@@ -118,6 +118,19 @@ ok('raw_facts keeps the numbers the user typed',
 """)
 
 
+def test_ai_accept_stores_facts_not_polished() -> None:
+    """The AI Accept path: raw_facts = my original text + answers,
+    text = the polished bullet, and they must not be the same string."""
+    passing("""
+const myWords = 'worked on backend for a staffing app using FastAPI and Postgres\\n1. 120 recruiters\\n2. FastAPI, Postgres, Redis\\n3. cut page load from 2s to 400ms\\n4. my part, small team of 3';
+const polished = 'Built a staffing app backend using FastAPI and Postgres, supporting 120 recruiters and reducing page load from 2s to 400ms';
+const b = M.makeBullet(polished, myWords);
+ok('text is polished', b.text === polished, b.text);
+ok('raw_facts has my words', b.raw_facts === myWords, b.raw_facts.slice(0, 60));
+ok('text is not the same string as raw_facts', b.text !== b.raw_facts, 'same string!');
+""")
+
+
 def test_summary_and_interests_are_strings_not_objects() -> None:
     """Stage 3 wrote {text: "..."} into a string field. The renderer would have
     printed [object Object] and the API would have rejected it."""
