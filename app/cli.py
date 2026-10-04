@@ -12,7 +12,7 @@ import sys
 
 from pydantic import BaseModel, Field
 
-from .config import API_KEY_VARS, PROVIDERS, get_settings
+from .config import API_KEY_VARS, PROVIDERS, REQUIRES_EXPLICIT_MODEL, get_settings
 from .llm import LLMError, ask
 
 
@@ -29,9 +29,17 @@ def run_check() -> int:
     key_var = API_KEY_VARS[provider]
 
     print(f"provider : {provider}")
-    print(f"model    : {settings.llm_model}")
+    print(f"model    : {settings.llm_model or '(not set)'}")
     print(f"base url : {settings.base_url}")
     print(f"key var  : {key_var}")
+
+    # Checked before the key: a missing model means nothing can be sent at all,
+    # so reporting "your API key is not set" first would send the user after the
+    # wrong problem.
+    unmet = settings.model_requirement
+    if unmet:
+        print(f"result   : FAIL - {unmet}")
+        return 1
 
     if not settings.api_key:
         print(f"result   : FAIL - {key_var} is not set")
@@ -74,7 +82,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.list_providers:
         print("supported LLM_PROVIDER values:")
         for p in PROVIDERS:
-            print(f"  {p:<10} key var: {API_KEY_VARS[p]}")
+            note = "  (LLM_MODEL required)" if p in REQUIRES_EXPLICIT_MODEL else ""
+            print(f"  {p:<10} key var: {API_KEY_VARS[p]}{note}")
         return 0
 
     if args.check_llm:
