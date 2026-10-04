@@ -731,9 +731,9 @@ async function run() {
     ok('and so does the editor',
        /Experience/.test(ed.textContent), 'the section list');
 
-    ok('KNOWN GAP: there is no AI-assisted writing yet',
-       /unavailable|cannot|denied/i.test(document.body.textContent),
-       'the AI window reports it honestly');
+    ok('Stage 4: the AI assist button exists on bullet sections',
+       document.body.textContent.indexOf('Tell the AI') !== -1,
+       'the editor exposes Tell the AI');
 
   } catch (err) {
     ok('the harness ran to completion', false,

@@ -238,3 +238,106 @@ def test_write_bullets_fact_guard_allows_present_digits() -> None:
     ])
     result = write_bullets("experience", "handled 500 requests/sec", llm=fake)
     assert result.bullets == ["Handled 500 requests/sec"]
+
+
+@pytest.mark.live
+def test_live_acceptance_1_and_2() -> None:
+    """Acceptance criteria 1+2 from Stage 4, hitting the real provider.
+
+    Acceptance 1: free text like 'worked on backend for a staffing app using
+    FastAPI and Postgres' makes the AI ask clarifying questions rather than
+    inventing numbers.
+    Acceptance 2: after I supply numbers, the bullet contains only those
+    numbers.
+
+    Uses app.llm.ask directly (no TestClient), so this is exactly 2 live
+    calls: one for extraction+questions, one for bullet writing.
+    """
+    import os
+    if not os.getenv("RUN_LIVE_LLM"):
+        pytest.skip("set RUN_LIVE_LLM=1 to run")
+
+    # Restore the real key from .env for this live test only.
+    # conftest scrubs OPENROUTER_API_KEY from the process env to prevent leaks;
+    # live tests deliberately opt back in.
+    from pathlib import Path
+    env_text = Path(".env").read_text(encoding="utf-8")
+    for line in env_text.splitlines():
+        if line.startswith("OPENROUTER_API_KEY="):
+            key = line.split("=", 1)[1].strip()
+            os.environ["OPENROUTER_API_KEY"] = key
+            break
+
+    from app import config
+    config.get_settings.cache_clear()
+
+    from app.assist import ask_clarifying, write_bullets
+
+    calls = 0
+    # Call 1: extract + questions
+    free_text = "worked on backend for a staffing app using FastAPI and Postgres"
+    extract = ask_clarifying("experience", free_text)
+    calls += 1
+    print(f"\n--- LIVE CALL {calls} (extract/questions) ---")
+    print(f"Entries: {extract.entries}")
+    print(f"Questions: {extract.questions}")
+    assert extract.questions, "Acceptance 1: must ask clarifying questions"
+
+    # Supply the numbers the user said
+    answers = "1. 120 recruiters\n2. FastAPI, Postgres, Redis\n3. cut page load from 2s to 400ms\n4. my part, small team of 3"
+
+    # Call 2: write bullets
+    raw_facts = free_text + "\n" + answers
+    bullets = write_bullets("experience", raw_facts)
+    calls += 1
+    print(f"\n--- LIVE CALL {calls} (write_bullets) ---")
+    for b in bullets.bullets:
+        print(f"  - {b}")
+
+    # Acceptance 2: bullet must contain ONLY numbers from raw_facts
+    import re
+    all_text = "\n".join(bullets.bullets)
+    numbers_in_output = set(re.findall(r"\d+", all_text))
+    numbers_in_input = set(re.findall(r"\d+", raw_facts))
+    invented = numbers_in_output - numbers_in_input
+    print(f"\nNumbers in output: {numbers_in_output}")
+    print(f"Numbers in input:  {numbers_in_input}")
+    print(f"Invented:          {invented}")
+    assert not invented, f"Acceptance 2 failed: invented numbers {invented}"
+    print(f"\nTOTAL LIVE CALLS: {calls}")
+
+
+@pytest.mark.live
+def test_live_acceptance_3_fact_guard() -> None:
+    """Acceptance 3: feed a prompt that tempts invention; output contains no
+    digits not in the input. Runs with the production fact_guard, not the LLM's
+    opinion.
+    """
+    import os
+    if not os.getenv("RUN_LIVE_LLM"):
+        pytest.skip("set RUN_LIVE_LLM=1 to run")
+
+    # Restore the real key from .env for this live test only.
+    from pathlib import Path
+    env_text = Path(".env").read_text(encoding="utf-8")
+    for line in env_text.splitlines():
+        if line.startswith("OPENROUTER_API_KEY="):
+            key = line.split("=", 1)[1].strip()
+            os.environ["OPENROUTER_API_KEY"] = key
+            break
+
+    from app import config
+    config.get_settings.cache_clear()
+
+    from app.assist import fact_guard, write_bullets
+
+    prompt = "did stuff with the backend, it was good"
+    result = write_bullets("experience", prompt)
+    output = "\n".join(result.bullets)
+    problems = fact_guard(output, prompt)
+    print(f"\n--- ACCEPTANCE 3 ---")
+    print(f"Input:  {prompt}")
+    print(f"Output: {output}")
+    print(f"Fact guard: {problems or 'clean'}")
+    assert not any("invented digits" in p for p in problems), "Acceptance 3 failed"
+

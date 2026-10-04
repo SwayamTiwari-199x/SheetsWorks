@@ -278,22 +278,18 @@ function openDisplay() {
         row.setAttribute('data-template', key);
         row.setAttribute('role', 'option');
         row.setAttribute('aria-selected', String(state.template === key));
+        row.addEventListener('click', () => {
+          state.template = key;
+          store.set('rb.template', state.template);
+          W.setStatus('display', 'Format set to ' + state.template, 'right');
+          list.querySelectorAll('.listbox-row').forEach((r) => {
+            r.setAttribute('aria-selected', String(r === row));
+          });
+          if (window.EditorForm) window.EditorForm.setTemplate(state.template);
+          renderTemplateHint();
+        });
         list.appendChild(row);
       });
-    list.addEventListener('click', () => {
-      const picked = list.querySelector('[aria-selected="true"]');
-      if (!picked) return;
-      state.template = picked.getAttribute('data-template');
-      store.set('rb.template', state.template);
-      W.setStatus('display', 'Format set to ' + state.template, 'right');
-      list.querySelectorAll('.listbox-row').forEach((r) => {
-        r.setAttribute('aria-selected', String(r === picked));
-      });
-      // The editor marks the sections this template will not print, so the
-      // choice is visible where the writing actually happens.
-      if (window.EditorForm) window.EditorForm.setTemplate(state.template);
-      renderTemplateHint();
-    });
     box.appendChild(list);
 
     const hint = el('div', 'dim', '');

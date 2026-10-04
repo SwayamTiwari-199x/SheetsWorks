@@ -364,10 +364,4 @@ def _load_prompt(name: str) -> str:
     path = root / name
     if not path.exists():
         raise FileNotFoundError(f"Prompt file not found: {path}")
-    text = path.read_text(encoding="utf-8")
-    # Also inject the shared honesty rules
-    honesty_path = root / "_honesty.md"
-    if honesty_path.exists():
-        honesty = honesty_path.read_text(encoding="utf-8")
-        return f"{honesty}\n\n---\n\n{text}"
-    return text
+    return path.read_text(encoding="utf-8")
