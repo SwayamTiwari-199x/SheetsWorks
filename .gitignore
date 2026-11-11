@@ -15,6 +15,7 @@ logs/
 # raise-on-click bug, so they belong in the repository, not in a scratch folder.
 out/
 exports/
+brag-output-*/
 
 # python
 __pycache__/

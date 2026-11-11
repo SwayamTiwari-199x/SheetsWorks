@@ -18,9 +18,17 @@ def client() -> TestClient:
         yield c
 
 
+def named(payload: dict, name: str = "Sample Applicant") -> dict:
+    """Export refuses while the name is the placeholder "Anon", so any test
+    that exports has to carry a name that is not the placeholder."""
+    out = dict(payload)
+    out["contact"] = dict(payload["contact"], name=name)
+    return out
+
+
 @pytest.fixture
 def seeded(client: TestClient, sample_profile_payload: dict) -> str:
-    client.put("/profile", json=sample_profile_payload)
+    client.put("/profile", json=named(sample_profile_payload))
     v = client.post("/versions/from-profile", params={"name": "My Resume"})
     assert v.status_code == 201
     return v.json()["id"]
@@ -43,8 +51,8 @@ def test_export_pdf_is_a_real_pdf(client: TestClient, seeded: str) -> None:
     assert r.content.startswith(b"%PDF")
     with pdfplumber.open(io.BytesIO(r.content)) as doc:
         text = "\n".join(p.extract_text() or "" for p in doc.pages)
-    assert "Dusht" in text
-    assert "dusht@example.com" in text
+    assert "Sample Applicant" in text
+    assert "anon@example.com" in text
 
 
 def test_export_pdf_reports_page_count_and_limit(client: TestClient, seeded: str) -> None:
@@ -86,19 +94,19 @@ def test_experienced_limit_is_two_pages(client: TestClient, seeded: str) -> None
 def test_export_docx_opens_with_python_docx(client: TestClient, seeded: str) -> None:
     r = client.post(f"/export/{seeded}", params={"format": "docx"})
     d = DocxDocument(io.BytesIO(r.content))
-    assert any("Dusht" in p.text for p in d.paragraphs)
+    assert any("Sample Applicant" in p.text for p in d.paragraphs)
 
 
 def test_export_txt_is_plain_text(client: TestClient, seeded: str) -> None:
     r = client.post(f"/export/{seeded}", params={"format": "txt"})
-    assert "Dusht" in r.text
+    assert "Sample Applicant" in r.text
     assert "\x00" not in r.text
 
 
 def test_export_filename_is_sanitised(client: TestClient, seeded: str) -> None:
     """The name reaches a Content-Disposition header, so it must be inert."""
     client.put("/profile", json={"contact": {
-        "name": "Dusht", "email": "a@b.com", "phone": "12345"}})
+        "name": "Sample Applicant", "email": "a@b.com", "phone": "12345"}})
     v = client.post("/versions/from-profile", params={"name": 'evil"; rm -rf / #.txt'}).json()
     r = client.post(f"/export/{v['id']}", params={"format": "txt"})
     disp = r.headers["content-disposition"]
@@ -137,15 +145,62 @@ def test_snapshot_requires_a_profile(client: TestClient) -> None:
 
 
 def test_export_without_snapshot_is_404(client: TestClient, sample_profile_payload: dict) -> None:
-    client.put("/profile", json=sample_profile_payload)
+    client.put("/profile", json=named(sample_profile_payload))
     assert client.post("/export/nope").status_code == 404
+
+
+# --- the placeholder name blocks export -----------------------------------
+
+
+def test_export_refuses_while_the_name_is_still_the_placeholder(
+    client: TestClient, sample_profile_payload: dict
+) -> None:
+    """A resume still named "Anon" is a template, not a document to send.
+
+    The snapshot is written through POST /versions directly, because the normal
+    export path (POST /versions/from-profile) refuses before it can be called --
+    which is the point of the next test.
+    """
+    client.put("/profile", json=sample_profile_payload)
+    created = client.post("/versions", json={
+        "name": "untitled",
+        "profile_snapshot": sample_profile_payload,
+    })
+    assert created.status_code == 201
+    for fmt in ("pdf", "docx", "txt"):
+        r = client.post(f"/export/{created.json()['id']}", params={"format": fmt})
+        assert r.status_code == 400, fmt
+        assert "Anon" in r.json()["detail"]
+        assert "My Resume" in r.json()["detail"]
+
+
+def test_a_refused_export_leaves_no_version_behind(
+    client: TestClient, sample_profile_payload: dict
+) -> None:
+    """The export flow is snapshot-then-export, so refusing at export time
+    alone would leave a stored version per attempt."""
+    client.put("/profile", json=sample_profile_payload)
+    before = len(client.get("/versions").json())
+    r = client.post("/versions/from-profile", params={"name": "Anon Resume"})
+    assert r.status_code == 400
+    assert "Anon" in r.json()["detail"]
+    assert len(client.get("/versions").json()) == before
+
+
+def test_export_allows_once_the_name_is_edited(
+    client: TestClient, sample_profile_payload: dict
+) -> None:
+    client.put("/profile", json=named(sample_profile_payload))
+    v2 = client.post("/versions/from-profile", params={"name": "untitled"})
+    assert v2.status_code == 201
+    assert client.post(f"/export/{v2.json()['id']}", params={"format": "txt"}).status_code == 200
 
 
 # --- personal details stay opt-in ----------------------------------------
 
 
 def test_personal_details_are_off_by_default(client: TestClient, sample_profile_payload: dict) -> None:
-    payload = dict(sample_profile_payload)
+    payload = named(sample_profile_payload)
     payload["personal_details"] = {"gender": "Female", "date_of_birth": "2001-04-02"}
     client.put("/profile", json=payload)
     v = client.post("/versions/from-profile", params={"name": "off"}).json()
@@ -157,7 +212,7 @@ def test_personal_details_are_off_by_default(client: TestClient, sample_profile_
 def test_personal_details_render_when_opted_in(
     client: TestClient, sample_profile_payload: dict
 ) -> None:
-    payload = dict(sample_profile_payload)
+    payload = named(sample_profile_payload)
     payload["personal_details"] = {"gender": "Female", "date_of_birth": "2001-04-02"}
     client.put("/profile", json=payload)
     v = client.post(

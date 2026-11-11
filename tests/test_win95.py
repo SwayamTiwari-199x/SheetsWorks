@@ -23,6 +23,8 @@ SHELL = (STATIC / "win" / "shell.js").read_text(encoding="utf-8")
 APP = (STATIC / "win" / "app.js").read_text(encoding="utf-8")
 EDITOR = (STATIC / "win" / "editor.js").read_text(encoding="utf-8")
 MODEL = (STATIC / "win" / "editor-model.js").read_text(encoding="utf-8")
+FAILURES_JS = (STATIC / "win" / "failures.js").read_text(encoding="utf-8")
+SAMPLE = (STATIC / "win" / "sample.js").read_text(encoding="utf-8")
 CSS = (STATIC / "win" / "win95.css").read_text(encoding="utf-8")
 HTML = (STATIC / "index.html").read_text(encoding="utf-8")
 
@@ -34,8 +36,10 @@ def _sample_profile() -> dict:
     sync with the required fields -- which is the mistake this file exists to
     catch elsewhere.
     """
+    # Not the placeholder "Anon": POST /versions/from-profile refuses to
+    # snapshot one, and most tests in this file snapshot to set up.
     return Profile(
-        contact={"name": "Dusht Verma", "email": "dusht@example.com",
+        contact={"name": "Sample Applicant", "email": "anon@example.com",
                  "phone": "+91 98765 43210"},
     ).model_dump(mode="json")
 
@@ -527,7 +531,7 @@ def test_a_sample_resume_exists_and_is_loadable() -> None:
     src = (STATIC / "win" / "sample.js").read_text(encoding="utf-8")
     assert "Sample Analytics" in src
     assert "Sample Institute of Technology" in src
-    assert "Dusht Verma" in src
+    assert "Anon" in src
 
 
 def test_the_sample_is_obviously_fake() -> None:
@@ -750,7 +754,8 @@ def test_no_file_references_a_global_that_does_not_exist() -> None:
     fails loudly beats a blank page.
     """
     for name, src in (("app.js", APP), ("editor.js", EDITOR),
-                      ("shell.js", SHELL), ("editor-model.js", MODEL)):
+                      ("shell.js", SHELL), ("editor-model.js", MODEL),
+                      ("failures.js", FAILURES_JS)):
         takes_global = re.search(r"\(function\s*\(\s*global\s*\)", src)
         body = re.sub(r"/\*.*?\*/", "", src, flags=re.DOTALL)
         for i, line in enumerate(body.splitlines(), 1):
@@ -759,16 +764,248 @@ def test_no_file_references_a_global_that_does_not_exist() -> None:
             if takes_global:
                 continue
             # Otherwise it must be node's own `global`, which only exists in the
-            # model file's fallback.
-            assert name == "editor-model.js", (
+            # modules that fall back to globalThis so node can drive them.
+            assert name in ("editor-model.js", "failures.js"), (
                 f"{name}:{i} uses `global.` but does not take it as a parameter"
             )
 
 
+def test_a_fresh_install_starts_as_the_placeholder_not_a_real_name() -> None:
+    """emptyProfile() is what a new install opens with.
+
+    It has to start as 'Anon', the same string POST /versions/from-profile
+    refuses, so the refusal is the real first-run state instead of a rule that
+    only triggers after the user typed the word 'Anon' themselves.
+    """
+    body = re.sub(r"/\*.*?\*/", "", APP, flags=re.DOTALL)
+    start = body.index("function emptyProfile()")
+    chunk = body[start:start + 600]
+    assert "name: 'Anon'" in chunk, "a fresh install opens with a blank name"
+
+    # No real personal data anywhere in the shipped front end. Expressed as
+    # "only placeholder contact values are present" rather than as a list of
+    # banned surnames, because a test that spells out the name it is banning
+    # puts the name back into the repository -- which is the thing it exists to
+    # prevent.
+    for src in (APP, EDITOR, SAMPLE):
+        for m in re.finditer(r"email:\s*'([^']+)'", src):
+            assert m.group(1).endswith("@example.com"), \
+                f"{m.group(1)} is not a reserved example address"
+        for m in re.finditer(r"phone:\s*'([^']+)'", src):
+            assert m.group(1).startswith("555-01"), \
+                f"{m.group(1)} is not the reserved 555-01xx fake range"
+        assert not re.search(r"city:\s*'[A-Z][a-z]", src), \
+            "an invented city is present"
+
+
+def test_the_ai_dialogs_show_the_servers_words_not_the_status_code() -> None:
+    """"HTTP 400" is not a diagnosis.
+
+    The provider's message names the field it rejected. Every AI fetch in
+    editor.js has to read it out of the response body instead of interpolating
+    res.status, or a real provider failure is reported as a meaningless number.
+
+    Both calls now share one `callAssist`, so this asserts on that instead of on a
+    call count: a second fetch added later would bypass the reader unless it also
+    goes through the helper, which the two `callAssist(` checks below require.
+    """
+    body = re.sub(r"/\*.*?\*/", "", EDITOR, flags=re.DOTALL)
+    bad = [
+        i for i, line in enumerate(body.splitlines(), 1)
+        if re.search(r"throw new Error\(\s*'HTTP ' \+ res\.status", line)
+    ]
+    assert not bad, f"editor.js:{bad}: throws away the server's error message"
+
+    for path in ("/assist/' + encodeURIComponent(sectionKey)", "/assist/answer"):
+        assert path in EDITOR, f"the AI flow no longer calls {path}"
+
+    # Each AI endpoint is reached through the shared helper, exactly once each.
+    assert EDITOR.count("await callAssist(") == 2, (
+        "the two AI calls no longer both go through callAssist, so one of them "
+        "has lost its waiting state, timeout and error message"
+    )
+    assert "await explainFailure(res)" in EDITOR, "editor.js lost the body reader"
+    # The reader itself now lives in failures.js so app.js and editor.js cannot
+    # report the same 422 two different ways. tests/test_failures.py drives that
+    # module and asserts the single definition; this is only the wiring.
+    assert "global.Failures.explainFailure" in EDITOR, (
+        "editor.js does not take the shared body reader from failures.js"
+    )
+    assert "window.Failures.explainFailure" in APP, (
+        "app.js does not take the shared body reader from failures.js"
+    )
+
+
+def test_a_slow_ai_call_has_a_waiting_state_and_a_timeout() -> None:
+    """A call that takes 80 seconds must not look like a frozen dialog.
+
+    The last real run took 80 seconds and spent three provider calls, because a
+    truncated reply makes the server retry with a bigger token allowance. Nothing
+    on screen said so. `callAssist` therefore shows a visible wait line, arms an
+    AbortController, and on timeout says what happened rather than hanging.
+    """
+    assert "async function callAssist(" in EDITOR, "editor.js lost callAssist"
+    assert "const AI_TIMEOUT_MS" in EDITOR, "the client has no timeout constant"
+
+    # History.push stringifies what it is given. A caller that stringifies first
+    # therefore snapshots a *string*, and undo then restores that string's
+    # characters as keys -- every section vanishes on the first refused write.
+    # It happened silently for every rejected write until a refused date exposed
+    # it, which is why this is pinned by name rather than left to review.
+    for src, name in ((EDITOR, "editor.js"), (MODEL, "editor-model.js")):
+        bad = re.search(r"history\.push\(\s*JSON\.stringify\(", src)
+        assert bad is None, (
+            f"{name} pushes an already-stringified profile into History.push, "
+            "so a rollback restores a string's characters instead of the profile"
+        )
+
+    body = re.sub(r"/\*.*?\*/", "", EDITOR, flags=re.DOTALL)
+    start = body.index("async function callAssist(")
+    call = body[start:start + 3000]
+
+    assert "AbortController" in call, "callAssist never aborts"
+    assert "AI_TIMEOUT_MS" in call, "callAssist never arms the timeout"
+    assert "setTimeout" in call, "callAssist never schedules the abort"
+    assert "ai-waiting" in call, "callAssist shows no waiting state"
+    # The timeout path must say the request was sent and nothing was saved,
+    # rather than reporting a bare network error.
+    assert "timedOut" in call, "callAssist cannot tell a timeout from other errors"
+    assert "nothing was saved" in call, "the timeout message is not actionable"
+
+    # The timeout must outlast the server's own, or we abort requests the server
+    # is still legitimately working on.
+    client_ms = re.search(r"AI_TIMEOUT_MS\s*=\s*(\d+)", EDITOR)
+    assert client_ms, "AI_TIMEOUT_MS is not a literal number of milliseconds"
+    config_src = (STATIC.parent / "config.py").read_text(encoding="utf-8")
+    server_s = re.search(r"llm_timeout_seconds\s*:\s*\S+\s*=\s*([\d.]+)", config_src)
+    assert server_s, "app/config.py lost llm_timeout_seconds"
+    assert float(server_s.group(1)) * 1000 < int(client_ms.group(1)), (
+        f"the client gives up at {client_ms.group(1)}ms but the server still "
+        f"tries until {server_s.group(1)}s, plus its own retries"
+    )
+
+
+def test_a_write_only_redraws_the_section_when_it_asks_to() -> None:
+    """Typing must not take the caret away.
+
+    Rebuilding the section replaces the input element, so the browser drops the
+    caret onto the body and the next keystroke lands nowhere. Every text field
+    used to lose focus after one character -- a word cost one click per letter.
+
+    The cause was `if (redraw !== false)`: a flag nobody passed counted as "yes,
+    rebuild", and the only callback that passed one was the list-entry field.
+    So the default is now opt-in, and this asserts both halves that make that
+    safe: the guard cannot be loosened back, and every call site which changes
+    the *shape* of a section asks for its rebuild on purpose.
+    """
+    body = re.sub(r"/\*.*?\*/", "", EDITOR, flags=re.DOTALL)
+
+    # The guard itself.
+    guard = re.search(r"function applyFn\(([^)]*)\)\s*\{(.*?)\n\}", body, re.DOTALL)
+    assert guard, "editor.js lost applyFn"
+    assert re.search(r"redrawOk\s*===\s*true", guard.group(2)), (
+        "applyFn rebuilds unless a caller positively asked: `redrawOk !== false` "
+        "means every write that forgets the flag destroys the input being typed "
+        "into, and the caret with it"
+    )
+    assert not re.search(r"redrawOk\s*!==\s*false", guard.group(2)), (
+        "applyFn is back to treating a missing flag as permission to rebuild"
+    )
+
+    # The text path can only rebuild on an explicit commit.
+    setter = re.search(r"function apply\(([^)]*)\)\s*\{(.*?)\n\}", body, re.DOTALL)
+    assert setter, "editor.js lost apply"
+    assert "done === true" in setter.group(2), (
+        "apply forwards a bare `done`, so a text field that drops the argument "
+        "hands applyFn an undefined flag and loses the caret"
+    )
+
+    # Every structural write asks, rather than relying on the old default. These
+    # are the ones that add or remove a row: if they stop redrawing, the change
+    # is invisible until the section is reopened.
+    structural = {
+        "'bullet'": "adding a bullet",
+        "M.setItem": "editing a list item",
+        "M.removeItem": "removing a list item",
+        "M.updateLink": "editing a link",
+        "M.removeLink": "removing a link",
+        "M.addLink": "adding a link",
+    }
+
+    def apply_fn_calls(src: str) -> list[str]:
+        """Every applyFn(...) call, matched by paren depth so that arguments
+        containing their own calls are not cut short at the first ')'. A regex
+        that stops at the first paren reports a `, true` two characters further
+        on as missing, which is the shape of a bug it would invent."""
+        found = []
+        for m in re.finditer(r"applyFn\(", src):
+            depth = 0
+            for i in range(m.end() - 1, len(src)):
+                if src[i] == "(":
+                    depth += 1
+                elif src[i] == ")":
+                    depth -= 1
+                    if depth == 0:
+                        found.append(src[m.start():i + 1])
+                        break
+        return found
+
+    for needle, what in structural.items():
+        hits = [c for c in apply_fn_calls(body) if needle in c]
+        assert hits, f"the {what} call to applyFn has gone; the test needs updating"
+        for call in hits:
+            assert re.search(r",\s*true\s*\)\s*$", call), (
+                f"{what} calls applyFn without asking for a rebuild, so the row "
+                "it changed will not appear until the section is reopened"
+            )
+
+    # And the date box still rebuilds on commit, which is the one text write
+    # that legitimately replaces what was typed with the stored form.
+    assert "input.addEventListener('change', () => onInput(input.value, true))" in body, (
+        "a date field no longer commits on blur, so a half-typed date is never "
+        "reported and the stored form is never shown"
+    )
+
+
+def test_the_harness_page_loads_the_same_scripts_as_the_app() -> None:
+    """tools/_verify.html is a third copy of the page's script list.
+
+    Adding a script to index.html and not to the harness page boots fine in the
+    app and dies in the harness -- or, worse, boots fine in the app and the
+    harness quietly skips the check that would have caught the bug it was
+    written for. That is how failures.js went missing from the harness run and
+    the first symptom was `boot never completed`, which says nothing about the
+    script list being wrong.
+    """
+    harness = (STATIC.parent.parent / "tools" / "_verify.html").read_text(
+        encoding="utf-8")
+
+    def app_scripts(src: str) -> list[str]:
+        found = re.findall(r'src="(/static/win/[^"]+)"', src)
+        return [f[len("/static/win/"):] for f in found]
+
+    assert app_scripts(harness) == app_scripts(HTML), (
+        "the harness page and the app load different scripts: "
+        f"harness {app_scripts(harness)} vs app {app_scripts(HTML)}"
+    )
+
+
+def test_the_wait_state_is_announced_and_animation_is_optional() -> None:
+    """A blinking icon is not feedback on its own; the words are."""
+    assert "ai-waiting-text" in EDITOR, "the wait line has no text"
+    css = CSS
+    assert ".ai-waiting" in css, "win95.css has no .ai-waiting rule"
+    assert "prefers-reduced-motion" in css, (
+        "the wait animation ignores prefers-reduced-motion"
+    )
+
+
 def test_every_front_end_script_is_loaded_in_order() -> None:
-    """shell, then sample and model, then the form, then the app that opens it.
-    Getting this wrong is a ReferenceError at boot."""
-    order = ["shell.js", "sample.js", "editor-model.js", "editor.js", "app.js"]
+    """shell, then sample and model, then failures, then the form, then the app
+    that opens it. Getting this wrong is a ReferenceError at boot, and both
+    editor.js and app.js read Failures at load time rather than lazily."""
+    order = ["shell.js", "sample.js", "editor-model.js", "failures.js",
+             "editor.js", "app.js"]
     positions = []
     for name in order:
         tag = f'src="/static/win/{name}"'
@@ -797,7 +1034,7 @@ def test_the_form_adopts_a_reloaded_profile() -> None:
 
     app.js and editor.js each hold a reference to the profile, and the app
     reloads it from the server on every boot. The form kept the empty object it
-    had been opened with, so the window said "My Resume - Dusht Verma" while
+    had been opened with, so the window said "My Resume - Anon" while
     every section read as empty. The form's refresh must take the new object.
     """
     body = EDITOR.split("function refresh(", 1)[1][:600]
@@ -814,11 +1051,22 @@ def test_the_form_adopts_a_reloaded_profile() -> None:
 
 def test_read_only_fields_do_not_look_editable() -> None:
     """The contact links box looked like a field, accepted typing, and discarded
-    it. Silently dropping what someone typed is worse than not offering the box."""
+    it. Silently dropping what someone typed is worse than not offering the box.
+
+    There is no longer a box at all: links are rows with a real Edit and a real
+    Remove. That is a stronger answer to the same complaint, so the test now
+    asserts the box is gone rather than that it is read-only."""
     body = EDITOR.split("if (spec.kind === 'contact')", 1)[1][:1400]
-    assert "readOnly = true" in body, (
-        "the links display must be read-only, not a field that eats input"
+    assert "renderLinks(host, 'Links'" in body, (
+        "contact links must be rendered as a list of rows"
     )
+    assert "readOnly" not in body, (
+        "a read-only links field is the shape this replaced"
+    )
+    links = EDITOR.split("function renderLinks(", 1)[1][:2600]
+    assert "'Edit this link'" in links, "each link row must offer an edit"
+    assert "'Remove this link'" in links, "each link row must offer a remove"
+    assert "askLink(" in links, "adding and editing must use the two-box dialog"
 
 
 def test_escape_can_dismiss_a_modal_dialog() -> None:
@@ -871,7 +1119,7 @@ def test_the_profile_is_never_cached() -> None:
     """A resume is a name, an email and a phone number. Exports and previews
     were already no-store; GET /profile was not, so it could be left in a disk
     cache or a shared proxy. Swept for rather than assumed."""
-    profile = {"contact": {"name": "Dusht Verma", "email": "dusht@example.com",
+    profile = {"contact": {"name": "Anon", "email": "anon@example.com",
                            "phone": "+91 98765 43210"}}
     with TestClient(app) as c:
         c.put("/profile", json=profile)

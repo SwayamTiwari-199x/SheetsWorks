@@ -117,6 +117,116 @@ function spec(section) { return SECTIONS[section] || null; }
 function isList(section) { const s = spec(section); return !!(s && s.list); }
 function isText(section) { const s = spec(section); return !!(s && s.kind === 'text'); }
 
+/* --------------------------------------------------------------- dates */
+/* The server normalises dates in models.normalise_date. This is the same rule
+   written again in JavaScript, and it exists for one reason: without it the
+   field still reads "July 2026" after a save that stored "2026-07", so the user
+   cannot see what was recorded, and a typo only surfaces as a 422 whose loc
+   path ("body.experience.0.start") means nothing to the person looking at it.
+
+   tests/check_static.py reads DATE_MONTHS out of this file and compares it to
+   _MONTH_NAMES in app/models.py, so the two copies cannot quietly drift. */
+
+const DATE_HELP = 'Write it as 2026-07, or as July 2026 / Jul 2026 / 07/2026 / '
+  + '2026 / 2026-07-15. For an ongoing role write Present, Current, Now, '
+  + 'Ongoing or Till date.';
+
+const PRESENT = 'Present';
+
+const PRESENT_WORDS = [
+  'present', 'current', 'currently', 'now', 'ongoing', 'till date', 'to date',
+  'presently', 'still', 'todate', 'till now', 'to present', 'till present',
+  'still going', 'still working',
+];
+
+const DATE_MONTHS = {
+  jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3,
+  apr: 4, april: 4, may: 5, jun: 6, june: 6, jul: 7, july: 7,
+  aug: 8, august: 8, sep: 9, sept: 9, september: 9,
+  oct: 10, october: 10, nov: 11, november: 11, dec: 12, december: 12,
+};
+
+/* Which fields are dates, per section. Kept next to the field lists so a new
+   date field has to be declared once. */
+const DATE_FIELDS = {
+  education: ['start', 'end'],
+  experience: ['start', 'end'],
+  projects: ['start', 'end'],
+  certifications: ['date'],
+  achievements: ['date'],
+  extracurriculars: ['date'],
+  publications: ['date'],
+};
+
+function isDateField(section, field) {
+  const f = DATE_FIELDS[section];
+  return !!(f && f.indexOf(field) !== -1);
+}
+
+/* Returns the stored form, or throws with a message that says what to type.
+   Never guesses: an unreadable value is an error, not a plausible date. */
+function normaliseDate(value) {
+  if (value === null || value === undefined) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const low = raw.toLowerCase().replace(/[ .]+$/, '');
+  if (PRESENT_WORDS.indexOf(low) !== -1 || raw === PRESENT) return PRESENT;
+
+  if (/^\d{4}-(0[1-9]|1[0-2])$/.test(raw)) return raw;
+
+  let m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if (m) {
+    if (!realDay(+m[1], +m[2], +m[3])) throw new Error(badDate(raw));
+    return raw;
+  }
+
+  m = /^([A-Za-z]{3,9})\.?,?\s*[-/ ]?\s*(\d{4})\.?$/.exec(raw);
+  if (m) return fromMonthName(m[1], m[2], raw);
+
+  m = /^(\d{4})\s*[-/. ]\s*(\d{1,2})$/.exec(raw);
+  if (m) return fromMonthName(null, m[1], raw, +m[2]);
+
+  m = /^(?:(\d{1,2})(?:st|nd|rd|th)?\s*[-/.]\s*)?(\d{1,2})\s*[-/.]\s*(\d{4})$/.exec(raw);
+  if (m) return fromMonthName(null, m[3], raw, +m[2], m[1] ? +m[1] : 0);
+
+  m = /^(\d{4})\s*[-/. ]\s*([A-Za-z]{3,9})$/.exec(raw);
+  if (m) return fromMonthName(m[2], m[1], raw);
+
+  m = /^(\d{4})\.?$/.exec(raw);
+  if (m) return m[1];   // a bare year stays a year, never January
+
+  throw new Error(badDate(raw));
+}
+
+function badDate(raw) {
+  return '\'' + raw + '\' is not a date I can read. ' + DATE_HELP;
+}
+
+function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+function realDay(y, mo, d) {
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return false;
+  const days = [31, (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0 ? 29 : 28,
+    31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return d <= days[mo - 1];
+}
+
+/* Build YYYY-MM (or YYYY-MM-DD when a day was typed). `name` is null for the
+   numeric forms. A day is only ever stored when the user typed one. */
+function fromMonthName(name, year, raw, monthNumber, dayNumber) {
+  let month = monthNumber;
+  if (month === undefined) {
+    month = DATE_MONTHS[String(name || '').toLowerCase().replace(/\.$/, '')];
+  }
+  if (!month || month < 1 || month > 12) throw new Error(badDate(raw));
+  const y = Number(year);
+  if (dayNumber) {
+    if (!realDay(y, month, dayNumber)) throw new Error(badDate(raw));
+    return String(y) + '-' + pad2(month) + '-' + pad2(dayNumber);
+  }
+  return String(y) + '-' + pad2(month);
+}
+
 /* --------------------------------------------------------------- helpers */
 
 function uid(prefix) {
@@ -259,9 +369,7 @@ function setField(profile, section, index, field, value) {
       return 'bullet added (' + entry.bullets.length + ' total)';
     }
     const target = APPENDER_TARGET[field];
-    const arr = entry[target] || (entry[target] = []);
-    arr.push(text);
-    return field + ' added (' + arr.length + ' total)';
+    return pushItem(entry, target, text);
   }
 
   if (s.kind === 'simple' && s.fields.indexOf(field) === -1) {
@@ -272,6 +380,14 @@ function setField(profile, section, index, field, value) {
   if (s.fields.indexOf(field) === -1) {
     throw new Error('unknown field for ' + section + ': ' + field);
   }
+  if (isDateField(section, field)) {
+    // Normalise on the way in, not on the server. The field then shows what was
+    // actually recorded, and an unreadable value is reported here -- where the
+    // user is looking at the box they typed it into -- instead of arriving later
+    // as a 422 naming a JSON path.
+    entry[field] = normaliseDate(value);
+    return field + ' set to ' + (entry[field] === null ? 'blank' : entry[field]);
+  }
   entry[field] = String(value === undefined || value === null ? '' : value);
   return field + ' set';
 }
@@ -281,6 +397,87 @@ const APPENDER_TARGET = {
   tech: 'tech',
   item: 'items',
 };
+
+/* --------------------------------------------------------------- lists */
+/* Skills items, project tech and coursework are real lists now: one item per
+   row, editable and removable, instead of one text line that could only be
+   appended to. The old behaviour made a typo permanent -- there was no way to
+   correct "Pythno" without deleting the whole group and retyping it -- and it
+   made a duplicate invisible, because "Python, Python" reads as one skill to
+   nobody. */
+
+const LIST_TARGET = APPENDER_TARGET;
+
+function listOf(profile, section, index, field) {
+  const s = spec(section);
+  if (!s) throw new Error('unknown section: ' + section);
+  const target = LIST_TARGET[field];
+  if (!target) throw new Error(section + ' has no ' + field + ' list');
+  if (index === null || index === undefined) {
+    throw new Error(section + ' ' + field + ' belongs to one entry');
+  }
+  const entry = entries(profile, section)[Number(index) - 1];
+  if (!entry) {
+    throw new Error('there is no ' + section + ' entry ' + index
+      + ' (you have ' + entries(profile, section).length + ')');
+  }
+  return entry[target] || (entry[target] = []);
+}
+
+/* Two items are the same item when they differ only in case or surrounding
+   space. "Python" and "python" printed on the same line looks like a mistake to
+   a reader and doubles the skill for an ATS, which counts tokens. */
+function sameItem(a, b) {
+  return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+}
+
+function pushItem(entry, target, text) {
+  const arr = entry[target] || (entry[target] = []);
+  const value = String(text).trim();
+  if (!value) throw new Error('nothing to add');
+  if (arr.some((x) => sameItem(x, value))) {
+    throw new Error('\'' + value + '\' is already in this list');
+  }
+  arr.push(value);
+  return target.replace(/s$/, '') + ' added (' + arr.length + ' total)';
+}
+
+/* Replace one item in place. Refuses a value that collides with a *different*
+   row, so an edit cannot silently produce the duplicate that adding rejects. */
+function setItem(profile, section, index, field, itemIndex, value) {
+  const arr = listOf(profile, section, index, field);
+  const i = Number(itemIndex);
+  if (!(i >= 1 && i <= arr.length)) {
+    throw new Error('there is no item ' + itemIndex + ' in this list (you have '
+      + arr.length + ')');
+  }
+  const next = String(value === undefined || value === null ? '' : value).trim();
+  if (!next) throw new Error('an empty item would print as a gap, so remove it instead');
+  if (arr.some((x, j) => j !== i - 1 && sameItem(x, next))) {
+    throw new Error('\'' + next + '\' is already in this list');
+  }
+  arr[i - 1] = next;
+  return field + ' ' + i + ' set to ' + next;
+}
+
+function removeItem(profile, section, index, field, itemIndex) {
+  const arr = listOf(profile, section, index, field);
+  const i = Number(itemIndex);
+  if (!(i >= 1 && i <= arr.length)) {
+    throw new Error('there is no item ' + itemIndex + ' in this list (you have '
+      + arr.length + ')');
+  }
+  const gone = arr.splice(i - 1, 1)[0];
+  return 'removed ' + gone + ' (' + arr.length + ' left)';
+}
+
+/* The one-line form the renderer prints, so the form can show the user exactly
+   what will be exported: "Languages: Python, SQL, Go". */
+function groupLabel(entry) {
+  if (!entry) return '';
+  const items = (entry.items || []).filter((x) => String(x).trim());
+  return items.length ? entry.name + ': ' + items.join(', ') : (entry.name || '');
+}
 
 /* "did the thing | because of the thing" -> text and raw facts. The author's own
    words for raw_facts, so a later AI pass has something to work from. */
@@ -299,16 +496,93 @@ function setLink(entry, value) {
   return addLink(entry, value);
 }
 
-/* `link` takes "Label url". */
-function addLink(owner, text) {
-  const raw = Array.isArray(text) ? text.join(' ') : String(text || '');
+/* Links take either a "Label url" string (so the one-field dialog still works)
+   or a {label, url} pair (so a two-field dialog can edit one without guessing
+   where the label ends -- a label is very often more than one word, and splitting
+   on the first space used to turn "My GitHub" into "My" plus "GitHub url"). */
+function splitLink(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return {
+      label: String(value.label === undefined ? '' : value.label).trim(),
+      url: String(value.url === undefined ? '' : value.url).trim(),
+    };
+  }
+  const raw = Array.isArray(value) ? value.join(' ') : String(value || '');
   const cut = raw.indexOf(' ');
-  const label = (cut === -1 ? raw : raw.slice(0, cut)).trim();
-  const url = (cut === -1 ? '' : raw.slice(cut + 1)).trim();
-  if (!label || !url) throw new Error('a link needs a label and a url: link GitHub github.com/me');
+  return {
+    label: (cut === -1 ? raw : raw.slice(0, cut)).trim(),
+    url: (cut === -1 ? '' : raw.slice(cut + 1)).trim(),
+  };
+}
+
+/* A URL is compared without its scheme, without a leading "www.", without case
+   and without a trailing slash, because "github.com/me",
+   "https://GitHub.com/me/" and "http://www.github.com/me" are the same
+   destination and printing all three is a visible mistake on the page. */
+function normaliseUrl(u) {
+  return String(u).trim().toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '')
+    .replace(/\/+$/, '');
+}
+
+function sameLink(a, b) {
+  return normaliseUrl(a) === normaliseUrl(b);
+}
+
+function addLink(owner, value) {
+  const { label, url } = splitLink(value);
+  if (!label || !url) {
+    throw new Error('a link needs a label and a url: link GitHub github.com/me');
+  }
   const arr = owner.links || (owner.links = []);
+  if (arr.some((l) => sameLink(l.url, url))) {
+    throw new Error('\'' + url + '\' is already in this list');
+  }
   arr.push({ label: label, url: url });
   return 'link added: ' + label;
+}
+
+/* Edit one link in place. Both halves are required, because models.Link has
+   min_length=1 on each: a half-filled link is a 422 the user cannot see the
+   cause of. */
+function updateLink(owner, linkIndex, value) {
+  const arr = owner.links || (owner.links = []);
+  const i = Number(linkIndex);
+  if (!(i >= 1 && i <= arr.length)) {
+    throw new Error('there is no link ' + linkIndex + ' (you have ' + arr.length + ')');
+  }
+  const { label, url } = splitLink(value);
+  if (!label || !url) {
+    throw new Error('a link needs both a label and a url -- '
+      + 'label GitHub, url github.com/me');
+  }
+  if (arr.some((l, j) => j !== i - 1 && sameLink(l.url, url))) {
+    throw new Error('\'' + url + '\' is already in this list');
+  }
+  arr[i - 1] = { label: label, url: url };
+  return 'link ' + i + ' set to ' + label;
+}
+
+function removeLink(owner, linkIndex) {
+  const arr = owner.links || (owner.links = []);
+  const i = Number(linkIndex);
+  if (!(i >= 1 && i <= arr.length)) {
+    throw new Error('there is no link ' + linkIndex + ' (you have ' + arr.length + ')');
+  }
+  const gone = arr.splice(i - 1, 1)[0];
+  return 'removed ' + gone.label + ' (' + arr.length + ' left)';
+}
+
+/* Which object owns a links[] array: contact is the profile itself, everything
+   else is an entry in a list. One lookup so the UI cannot get it wrong. */
+function linkOwner(profile, section, index) {
+  if (section === 'contact') {
+    return profile.contact || (profile.contact = {});
+  }
+  const entry = entries(profile, section)[Number(index) - 1];
+  if (!entry) throw new Error('there is no ' + section + ' entry ' + index);
+  return entry;
 }
 
 /* ------------------------------------------------------------ entry edits */
@@ -424,6 +698,29 @@ function validate(profile) {
     problems.push({ where: 'contact', message: 'That email has no @ in it.' });
   }
 
+  /* Dates, checked here so the person is told which entry and which box, in a
+     sentence, rather than receiving a 422 naming body.experience.2.end. The
+     normalisation itself already happened in setField; this catches a value
+     that arrived some other way (sample data, an older build, a paste). */
+  Object.keys(DATE_FIELDS).forEach((section) => {
+    if (!profile || !profile[section]) return;
+    const list = entries(profile, section);
+    list.forEach((entry, i) => {
+      DATE_FIELDS[section].forEach((field) => {
+        const v = entry ? entry[field] : null;
+        if (v === null || v === undefined || String(v).trim() === '') return;
+        try {
+          normaliseDate(v);
+        } catch (err) {
+          problems.push({
+            where: SECTIONS[section].label + ' ' + (i + 1),
+            message: err.message,
+          });
+        }
+      });
+    });
+  });
+
   (profile && profile.experience ? profile.experience : []).forEach((e, i) => {
     if (e.type && EXPERIENCE_TYPES.indexOf(e.type) === -1) {
       problems.push({
@@ -474,9 +771,13 @@ History.prototype.undo = function (profile) {
 
 global.EditorModel = {
   SECTIONS, ORDER, EXPERIENCE_TYPES, MAX_UNDO,
+  DATE_FIELDS, PRESENT_WORDS, DATE_MONTHS, DATE_HELP,
   spec, isList, isText, entries, count, filled, missing,
   makeBullet, bulletText, normaliseBullets, splitBullet, blankEntry,
   setField, addEntry, removeEntry, moveEntry,
+  setItem, removeItem, listOf, groupLabel, sameItem,
+  addLink, updateLink, removeLink, linkOwner, splitLink, sameLink, normaliseUrl,
+  normaliseDate, isDateField,
   validate, History, clone, uid,
 };
 

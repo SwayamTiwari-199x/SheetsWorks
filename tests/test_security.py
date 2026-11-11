@@ -15,7 +15,7 @@ from app.render import build_doc, render_docx, render_pdf, render_txt
 
 
 def contact(**kw) -> dict:
-    base = {"name": "Dusht", "email": "dusht@example.com", "phone": "+91 98765 43210"}
+    base = {"name": "Anon", "email": "anon@example.com", "phone": "+91 98765 43210"}
     base.update(kw)
     return base
 
@@ -102,13 +102,17 @@ def test_bullet_count_is_capped() -> None:
 # --- 4. Deep nesting caused a 500 with a traceback ------------------------
 
 
-def test_deeply_nested_body_returns_422_not_500() -> None:
+def test_deeply_nested_body_returns_4xx_not_500() -> None:
+    # 422 is this app's own answer; FastAPI >= 0.115 also catches the parse
+    # failure itself and answers 400 "There was an error parsing the body".
+    # Either is fine, a 500 with a traceback is not.
     raw = b'{"contact":' + b"[" * 3000 + b"]" * 3000 + b"}"
     with TestClient(app) as client:
         r = client.put(
             "/profile", content=raw, headers={"Content-Type": "application/json"}
         )
-    assert r.status_code == 422, "over-nested body must not produce a 500"
+    assert r.status_code in (400, 422), "over-nested body must not produce a 500"
+    assert r.headers["content-type"].startswith("application/json")
 
 
 # --- 5. DNS rebinding via Host header -------------------------------------

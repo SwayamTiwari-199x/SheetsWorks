@@ -62,16 +62,21 @@ def head(title):
 
 # --------------------------------------------------------------- the data
 
+# Neutral placeholder data only. Nothing here is a real person: the name is a
+# sample, the phone is the reserved 555-01xx range, and the city is empty rather
+# than invented. The summary and Interests lines exist so the renderer paths that
+# consume them are actually exercised, so they say something obviously synthetic
+# instead of plausible biographical detail.
 PROFILE = {
     "contact": {
-        "name": "Dusht Verma", "email": "dusht@example.com",
-        "phone": "+91 98765 43210", "city": "Bengaluru", "country": "India",
-        "links": [{"label": "GitHub", "url": "github.com/dusht"},
-                  {"label": "Portfolio", "url": "dusht.dev"}],
+        "name": "Sample Applicant", "email": "anon@example.com",
+        "phone": "555-0100", "city": "", "country": "",
+        "links": [{"label": "GitHub", "url": "example.org"},
+                  {"label": "Portfolio", "url": "example.org"}],
     },
-    "summary": ("Backend engineer, three years on payments and latency work. "
-                "I like problems where the bottleneck is hiding in a queue."),
-    "interests": "Trail running, chess, and rebuilding mechanical keyboards.",
+    "summary": ("Sample summary sentence, second sample summary sentence, "
+                "and a third one so the paragraph has some length to it."),
+    "interests": "Sample interest one, sample interest two.",
     "education": [{
         "institution": "Sample Institute of Technology",
         "degree": "B.E. Computer Science", "start": "2019-08", "end": "2022-06",
@@ -91,7 +96,7 @@ PROFILE = {
     }],
     "projects": [{
         "name": "Shift Scheduler", "role": "Solo build",
-        "links": [{"label": "Source", "url": "github.com/dusht/scheduler"}],
+        "links": [{"label": "Source", "url": "example.org/scheduler"}],
         "start": "2021-01", "end": "2021-06",
         "tech": ["FastAPI", "PostgreSQL", "Celery", "Redis"],
         "bullets": [{"raw_facts": "12 stores, 4h -> 30s",
@@ -139,8 +144,8 @@ check("PUT /profile accepts a full profile", st == 200, brief(b))
 st, h, b = call("GET", "/profile")
 check("GET /profile returns it back", st == 200, brief(b))
 if st == 200:
-    check("name survived", b["contact"]["name"] == "Dusht Verma")
-    check("interests survived", "Trail running" in b["interests"])
+    check("name survived", b["contact"]["name"] == "Sample Applicant")
+    check("interests survived", "Sample interest one" in b["interests"])
     check("both links survived", len(b["contact"]["links"]) == 2)
     check("grade stayed structured", b["education"][0]["grade"]["value"] == "8.72")
     check("bullets stayed objects", isinstance(b["experience"][0]["bullets"][0], dict))
@@ -209,9 +214,25 @@ check("preview validates its body", st == 422, str(st))
 # --------------------------------------------------------------- versions
 
 head("versions and snapshots")
-st, h, snap_blank = call("POST", "/versions/from-profile?name=Dusht%20Verma&template=blank")
+
+# The refusal is checked before anything is snapshotted, while the stored profile
+# still carries the placeholder name. Export is snapshot-then-export, so
+# refusing only at export time would leave a stored version per attempt.
+placeholder = json.loads(json.dumps(PROFILE))
+placeholder["contact"]["name"] = "Anon"
+call("PUT", "/profile", placeholder)
+st, h, b = call("POST", "/versions/from-profile?name=Anon%20Resume")
+check("a placeholder-named profile is refused before a snapshot exists",
+      st == 400 and "Anon" in b.get("detail", ""), f"{st} {brief(b)}")
+check("and the refusal stored nothing",
+      call("GET", "/versions")[2] == [], "a refused export must leave no trace")
+call("PUT", "/profile", PROFILE)
+
+st, h, snap_blank = call(
+    "POST", "/versions/from-profile?name=Sample%20Applicant&template=blank")
 check("snapshot blank", st == 201 and snap_blank["template"] == "blank", str(st))
-st, h, snap_sheets = call("POST", "/versions/from-profile?name=Dusht%20Verma&template=sheets")
+st, h, snap_sheets = call(
+    "POST", "/versions/from-profile?name=Sample%20Applicant&template=sheets")
 check("snapshot sheets", st == 201 and snap_sheets["template"] == "sheets", str(st))
 check("the two snapshots have different ids", snap_blank["id"] != snap_sheets["id"])
 
@@ -273,7 +294,7 @@ for tpl, vid in (("blank", snap_blank["id"]), ("sheets", snap_sheets["id"])):
         ctype = h.get("content-type", "")
         # The extension has to match the format; an earlier version of this
         # script hardcoded .txt and "failed" four correct filenames.
-        stem = "Dusht Verma - Resume" if tpl == "sheets" else "Dusht Verma"
+        stem = "Sample Applicant - Resume" if tpl == "sheets" else "Sample Applicant"
         expect_name = f"{stem}.{fmt}"
         check(f"{tpl}/{fmt} exports", st == 200 and len(raw) > 0,
               f"{st} {len(raw)}B")
@@ -305,23 +326,23 @@ for fmt in ("docx",):
     z = zipfile.ZipFile(io.BytesIO(exports[("blank", fmt)]))
     xml = z.read("word/document.xml").decode("utf-8")
     plain = re.sub(r"<[^>]+>", "", xml)
-    for word in ("Dusht", "Backend", "FastAPI", "PostgreSQL",
+    for word in ("Sample Applicant", "Backend", "FastAPI", "PostgreSQL",
                  "Hackathon", "settlement"):
         check(f"docx carries '{word}' like txt does",
               word in plain and word in txt_blank, word)
 
-check("txt starts with the name", txt_blank.strip().startswith("Dusht Verma"))
-check("txt contains the phone", "+91 98765 43210" in txt_blank)
+check("txt starts with the name", txt_blank.strip().startswith("Sample Applicant"))
+check("txt contains the phone", "555-0100" in txt_blank)
 check("txt uses a hyphen for bullets", "- Cut p99" in txt_blank,
       repr(txt_blank[:200]))
 
 txt_sheets = exports[("sheets", "txt")].decode("utf-8")
-check("sheets hides the summary", "bottleneck is hiding" not in txt_sheets)
-check("blank shows the summary", "bottleneck is hiding" in txt_blank)
+check("sheets hides the summary", "second sample summary sentence" not in txt_sheets)
+check("blank shows the summary", "second sample summary sentence" in txt_blank)
 check("sheets ends with the Interests line",
-      txt_sheets.strip().endswith("Trail running, chess, and rebuilding mechanical keyboards."),
+      txt_sheets.strip().endswith("Sample interest one, sample interest two."),
       repr(txt_sheets.strip()[-90:]))
-check("blank does not print Interests", "Trail running" not in txt_blank)
+check("blank does not print Interests", "Sample interest one" not in txt_blank)
 for section in ("Work Experience", "Skills", "Education", "Achievements",
                 "Publications"):
     check(f"sheets keeps '{section}'", section in txt_sheets)

@@ -115,14 +115,34 @@ async function run() {
     ok('the API accepts the sample profile', saved.ok, 'HTTP ' + saved.status);
     const reread = await (await fetch('/profile')).json();
     ok('the sample round-trips through the server',
-       !!(reread.contact && reread.contact.name === 'Dusht Verma'),
+       !!(reread.contact && reread.contact.name === 'Anon'),
        reread.contact && reread.contact.name);
 
     /* A version has to exist before the Versions pane can be said to list
        anything. Checked against GET /versions directly, so a failure here is
-       the endpoint's, not the browser's. */
+       the endpoint's, not the browser's.
+
+       Order matters. The sample's name is still 'Anon' at this point, and
+       POST /versions/from-profile refuses to snapshot one -- so the refusal is
+       checked first, while the profile really is a placeholder. */
+    const refused = await fetch('/versions/from-profile?name=Anon%20Resume',
+                                { method: 'POST' });
+    ok('a snapshot of the placeholder name is refused',
+       refused.status === 400, 'HTTP ' + refused.status);
+    const afterRefusal = await (await fetch('/versions')).json();
+    ok('and the refused attempt stored nothing',
+       Array.isArray(afterRefusal) && afterRefusal.length === 0,
+       JSON.stringify(afterRefusal).slice(0, 120));
+
+    const named = JSON.parse(JSON.stringify(S.state.profile));
+    named.contact.name = 'Sample Applicant';
+    await fetch('/profile', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(named),
+    });
     const snapRes = await fetch(
-      '/versions/from-profile?name=' + encodeURIComponent('Dusht Verma Resume')
+      '/versions/from-profile?name=' + encodeURIComponent('Sample Applicant Resume')
       + '&template=blank', { method: 'POST' });
     ok('a snapshot can be created', snapRes.status === 201, 'HTTP ' + snapRes.status);
     const listed = await (await fetch('/versions')).json();
@@ -131,7 +151,7 @@ async function run() {
     ok('and a summary carries no profile snapshot',
        Array.isArray(listed) && listed.length === 1
        && listed[0].profile_snapshot === undefined
-       && listed[0].name === 'Dusht Verma Resume',
+       && listed[0].name === 'Sample Applicant Resume',
        Array.isArray(listed) && listed.length ? JSON.stringify(listed[0]) : 'none');
 
     /* ---------------- tips, the way the real page gets them ----------------
@@ -481,7 +501,7 @@ async function run() {
 
     /* ---------------- the sample resume ---------------- */
     const sample = window.SampleResume.build();
-    ok('the sample has a name', sample.contact.name === 'Dusht Verma');
+    ok('the sample has a name', sample.contact.name === 'Anon');
     ok('the sample is obviously fictional',
        /Sample/.test(sample.experience[0].org) &&
        /Sample/.test(sample.education[0].institution));
@@ -532,8 +552,8 @@ async function run() {
 
     pickSection('Contact');
     await pause(150);
-    ok('the name field takes a value', setInput('name', 'Dusht Verma'));
-    ok('the email field takes a value', setInput('email', 'dusht@example.com'));
+    ok('the name field takes a value', setInput('name', 'Anon'));
+    ok('the email field takes a value', setInput('email', 'anon@example.com'));
     ok('the phone field takes a value', setInput('phone', '+91 98765 43210'));
     await pause(80);
     ok('typing marks the window dirty',
@@ -562,7 +582,7 @@ async function run() {
        ed2.querySelector('.win-title-text').textContent);
     const afterSave = await (await fetch('/profile')).json();
     ok('the server has the typed name',
-       !!(afterSave.contact && afterSave.contact.name === 'Dusht Verma'),
+       !!(afterSave.contact && afterSave.contact.name === 'Anon'),
        afterSave.contact && afterSave.contact.name);
     ok('the server has the typed entry',
        afterSave.experience.length === 1
@@ -734,6 +754,427 @@ async function run() {
     ok('Stage 4: the AI assist button exists on bullet sections',
        document.body.textContent.indexOf('Tell the AI') !== -1,
        'the editor exposes Tell the AI');
+
+    /* ---------------- the AI dialog's waiting state and timeout ---------- */
+    /* Driven against a stubbed fetch, so this costs no provider calls and still
+     * exercises the real dialog, the real waiting line and the real timeout.
+
+     * The thing worth catching here is silence: a 60-second request with nothing
+     * on screen looks identical to a broken button, and the one real run took 80
+     * seconds because a truncated reply makes the server retry. */
+
+    var realFetch = window.fetch;
+    var stub = { delay: 0, mode: 'ok', seen: [] };
+    window.fetch = function (url, opts) {
+      var u = String(url);
+      if (u.indexOf('/assist/') !== 0) return realFetch.apply(this, arguments);
+      stub.seen.push(u);
+      return new Promise(function (resolve, reject) {
+        setTimeout(function () {
+          if (stub.mode === 'unreachable') {
+            /* What fetch actually throws when the host is gone. A plain Error
+             * would not take the branch under test. */
+            var e = new TypeError('Failed to fetch');
+            reject(e);
+            return;
+          }
+          if (stub.mode === 'error') {
+            resolve(new Response(
+              JSON.stringify({ detail: 'Provider said the key is not authorised.' }),
+              { status: 502, headers: { 'Content-Type': 'application/json' } }));
+            return;
+          }
+          if (u === '/assist/answer') {
+            resolve(new Response(JSON.stringify({
+              bullets: [{ text: 'Built the billing service.', facts: [1] }],
+              numbered_facts: ['owned the billing service'],
+              unused_facts: [], reused_metrics: [], shared_facts: [],
+            }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+          } else {
+            resolve(new Response(JSON.stringify({ entries: [], questions: [] }),
+              { status: 200, headers: { 'Content-Type': 'application/json' } }));
+          }
+        }, stub.delay);
+      });
+    };
+
+    // The newest window on the page is the one a click just opened.
+    function lastWindow() {
+      var wins = Array.from(document.querySelectorAll('[data-window]'));
+      return wins[wins.length - 1];
+    }
+    function clickIn(node, label) {
+      var b = Array.from(node.querySelectorAll('button')).find(function (x) {
+        return x.textContent === label;
+      });
+      if (b) b.click();
+      return !!b;
+    }
+
+    // Experience already has an entry from earlier in the harness, so the
+    // section host offers "Tell the AI...".
+    var edWin = win('editor');
+    pickSection('Experience');
+    await pause(200);
+    var aiBtn = Array.from(edWin.querySelectorAll('button'))
+      .find(function (b) { return b.textContent.indexOf('Tell the AI') === 0; });
+    ok('the AI button appears on an Experience entry', !!aiBtn,
+       aiBtn ? 'found' : 'no entry selected');
+
+    if (aiBtn) {
+      aiBtn.click();
+      await pause(200);
+      var dumpDlg = lastWindow();
+      ok('clicking it opens a dialog',
+         /Tell the AI/.test(txt(dumpDlg)), txt(dumpDlg).slice(0, 60));
+
+      var ta = dumpDlg.querySelector('textarea');
+      ok('the dialog takes a rough description', !!ta);
+      if (ta) {
+        ta.value = 'worked on the backend for a staffing app';
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+
+      // A slow reply must put something on screen immediately.
+      stub.delay = 3000;
+      clickIn(dumpDlg, 'Continue');
+      await pause(400);
+      var waiting = document.querySelector('.ai-waiting');
+      ok('a slow call shows a visible waiting state', !!waiting,
+         waiting ? txt(waiting).slice(0, 80) : 'nothing appeared');
+      ok('and the waiting state says what is happening',
+         !!waiting && /Asking the AI/.test(txt(waiting)),
+         waiting ? txt(waiting).slice(0, 120) : 'n/a');
+      ok('the waiting line is styled, not bare text',
+         !!waiting && getComputedStyle(waiting).display !== 'inline',
+         waiting ? getComputedStyle(waiting).display : 'n/a');
+      ok('the buttons are disabled while it waits',
+         Array.from(dumpDlg.querySelectorAll('.msg-buttons button'))
+           .every(function (b) { return b.disabled; }));
+
+        await pause(3200);
+      ok('the waiting line goes away once it answers',
+         !document.querySelector('.ai-waiting'),
+         txt(document.querySelector('.ai-waiting')).slice(0, 60));
+    }
+
+    // Now the failure path: a provider 502 must show the provider's own words.
+    stub.delay = 50;
+    stub.mode = 'error';
+    if (aiBtn) {
+      // The dialog that survived the slow call is gone; reopen.
+      aiBtn.click();
+      await pause(200);
+      var d2 = lastWindow();
+      var ta2 = d2.querySelector('textarea');
+      if (ta2) { ta2.value = 'more backend work'; }
+      clickIn(d2, 'Continue');
+      await pause(600);
+      var failed = d2.querySelector('.ai-waiting.ai-waiting-failed');
+      ok('a provider failure is left visible in the dialog', !!failed,
+         failed ? txt(failed).slice(0, 120) : 'no failed line');
+      ok('and it quotes the provider, not the status code',
+         !!failed && /key is not authorised/.test(txt(failed)),
+         failed ? txt(failed).slice(0, 160) : 'n/a');
+      ok('and it says nothing was saved',
+         !!failed && /nothing was saved/i.test(txt(failed)),
+         failed ? txt(failed).slice(0, 200) : 'n/a');
+
+      // Dismiss the message box so the next check starts clean.
+      var mb = Array.from(document.querySelectorAll('[data-window]'))
+        .filter(function (w) { return /AI request failed/.test(txt(w)); });
+      mb.forEach(function (w) {
+        var okb = Array.from(w.querySelectorAll('button'))
+          .find(function (b) { return b.textContent === 'OK'; });
+        if (okb) okb.click();
+      });
+      await pause(200);
+    }
+
+    // A server that is gone must not be reported as a provider problem.
+    stub.mode = 'unreachable';
+    stub.delay = 50;
+    if (aiBtn) {
+      aiBtn.click();
+      await pause(200);
+      var d3 = lastWindow();
+      var ta3 = d3.querySelector('textarea');
+      if (ta3) { ta3.value = 'still backend work'; }
+      clickIn(d3, 'Continue');
+      await pause(600);
+      // Scoped to this dialog: the previous failure's line is still on screen in
+      // the dialog behind it, and document-wide would find that one instead.
+      var gone = d3.querySelector('.ai-waiting.ai-waiting-failed');
+      ok('an unreachable server is named as such',
+         !!gone && /Could not reach the app/.test(txt(gone)),
+         gone ? txt(gone).slice(0, 160) : 'n/a');
+      Array.from(document.querySelectorAll('[data-window]'))
+        .filter(function (w) { return /AI request failed/.test(txt(w)); })
+        .forEach(function (w) {
+          var okb = Array.from(w.querySelectorAll('button'))
+            .find(function (b) { return b.textContent === 'OK'; });
+          if (okb) okb.click();
+        });
+      await pause(200);
+    }
+
+    ok('the AI dialog made no real provider request',
+       stub.seen.every(function (u) { return u.indexOf('/assist/') === 0; }),
+       stub.seen.join(', '));
+    window.fetch = realFetch;
+
+    /* ---------------- skills, tech and links are real lists -------------- */
+    /* The thing being checked is not that a list exists -- it did -- but that
+     * each item can be corrected and deleted where it stands. Before this, a
+     * typo meant deleting the whole group and retyping every item, because the
+     * list was one append-only text line. */
+
+    pickSection('Skills');
+    await pause(250);
+    var skillRows = edWin.querySelectorAll('.ed-item');
+    ok('a skills item is a row with its own controls', skillRows.length > 0,
+       skillRows.length + ' rows');
+    ok('each row offers an edit', skillRows.length > 0 &&
+       Array.from(skillRows).every(function (r) {
+         return Array.from(r.querySelectorAll('button'))
+           .some(function (b) { return b.title === 'Edit this item'; });
+       }));
+    ok('and a remove', skillRows.length > 0 &&
+       Array.from(skillRows).every(function (r) {
+         return Array.from(r.querySelectorAll('button'))
+           .some(function (b) { return b.title === 'Remove this item'; });
+       }));
+    ok('the group is shown as it will be printed',
+       /Printed as: .+: .+/.test(txt(edWin)),
+       (txt(edWin).match(/Printed as: [^\n]{0,80}/) || ['none'])[0]);
+
+    // Remove one row through the UI and confirm the page really changed.
+    if (skillRows.length) {
+      var rowsBefore = skillRows.length;
+      Array.from(skillRows[0].querySelectorAll('button'))
+        .find(function (b) { return b.title === 'Remove this item'; }).click();
+      await pause(250);
+      var rowsAfter = edWin.querySelectorAll('.ed-item').length;
+      ok('removing a row takes it off the page', rowsAfter === rowsBefore - 1,
+         rowsBefore + ' -> ' + rowsAfter);
+    }
+
+    // A link is two boxes, not one "label url" box that split on the first space.
+    pickSection('Contact');
+    await pause(250);
+    var addLinkBtn = Array.from(edWin.querySelectorAll('button'))
+      .find(function (b) { return b.textContent === 'Add a link'; });
+    ok('links are added from a real list, not a read-only field',
+       !!addLinkBtn && !/Add a link/.test(
+         Array.from(edWin.querySelectorAll('label'))
+           .map(function (l) { return l.textContent; }).join(' ')),
+       addLinkBtn ? 'Add a link button' : 'missing');
+    if (addLinkBtn) {
+      addLinkBtn.click();
+      await pause(200);
+      var linkDlg = lastWindow();
+      var linkLabels = Array.from(linkDlg.querySelectorAll('.ed-label'))
+        .map(function (l) { return l.textContent; });
+      ok('the link dialog asks for a label and a url separately',
+         linkLabels.join(',') === 'label,url', linkLabels.join(','));
+      var inputs = linkDlg.querySelectorAll('.ed-input');
+      if (inputs.length === 2) {
+        inputs[0].value = 'My GitHub';
+        inputs[1].value = 'github.com/me';
+      }
+      clickIn(linkDlg, 'OK');
+      await pause(300);
+      var linkRow = Array.from(edWin.querySelectorAll('.ed-item'))
+        .find(function (r) { return /My GitHub/.test(txt(r)); });
+      ok('a two-word label survives being saved', !!linkRow,
+         linkRow ? txt(linkRow) : 'row not found');
+      ok('and the row can be corrected', !!linkRow &&
+         Array.from(linkRow.querySelectorAll('button'))
+           .some(function (b) { return b.title === 'Edit this link'; }));
+    }
+
+    /* The hint used to be printed twice in "Add a bullet" and "Add item". */
+    pickSection('Experience');
+    await pause(250);
+    var addBullet = Array.from(edWin.querySelectorAll('button'))
+      .find(function (b) { return b.textContent === 'Add a bullet'; });
+    if (addBullet) {
+      addBullet.click();
+      await pause(200);
+      var bulletDlg = lastWindow();
+      var hint = 'the claim, optionally: claim | the numbers behind it';
+      var occurrences = txt(bulletDlg).split(hint).length - 1;
+      ok('the add-bullet hint is shown once, not twice', occurrences === 1,
+         occurrences + ' times');
+      ok('and the box has no duplicate label',
+         bulletDlg.querySelectorAll('.ed-label').length === 0,
+         bulletDlg.querySelectorAll('.ed-label').length + ' labels');
+      clickIn(bulletDlg, 'Cancel');
+      await pause(150);
+    }
+
+    /* A date typed the way a person types it is stored the way the page shows
+     * it. Before this the field kept "July 2026" while the server stored
+     * "2026-07", so nothing on screen showed what had been recorded.
+
+     * Dates commit on blur, not per keystroke: "Jul" on its way to "July 2019"
+     * is not a readable date, and committing each character threw a message box
+     * at every one of them. Both are checked here. */
+    pickSection('Education');
+    await pause(250);
+    function startBox() {
+      return Array.from(edWin.querySelectorAll('.ed-field'))
+        .filter(function (f) { return txt(f.querySelector('.ed-label')) === 'start'; })
+        .map(function (f) { return f.querySelector('.ed-input'); })[0];
+    }
+    // Only date complaints count here. The AI tests leave dialogs lying about,
+    // and counting every dialog would blame them on whatever ran next.
+    function dateErrors() {
+      return Array.from(edWin.parentNode.querySelectorAll('.win.dialog'))
+        .filter(function (d) { return /is not a date i can read/i.test(txt(d)); })
+        .map(function (d) { return txt(d).slice(0, 90); });
+    }
+    var errs0 = dateErrors().length;
+    var startInput = startBox();
+    // The rest of the profile, read back from the server, so a refused write
+    // cannot quietly empty the sections around it.
+    var profileBefore = await fetch('/profile').then(function (r) { return r.json(); });
+    if (startInput) {
+      // clear it first, then type it the way a person does, one character
+      startInput.value = '';
+      'July 2019'.split('').forEach(function (ch) {
+        startInput.value += ch;
+        startInput.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await pause(200);
+      ok('a half-typed date raises no error box while it is being typed',
+         dateErrors().length === errs0, dateErrors().join(' || ') || 'none');
+      ok('and the text is left alone under the caret',
+         startInput.value === 'July 2019', startInput.value);
+
+      startInput.dispatchEvent(new Event('change', { bubbles: true }));
+      await pause(250);
+      // the section redraws on commit, so the box must be looked up again
+      var committed = startBox();
+      // The server is the contract that matters: whatever the page shows, the stored
+      // date has to be the normalised one. Reading it back also avoids guessing
+      // which object the editor mutates.
+      await pause(2600);
+      var storedStart = await fetch('/profile').then(function (r) { return r.json(); })
+        .then(function (j) {
+          return j.education && j.education[0] ? String(j.education[0].start)
+                                              : 'no education entry';
+        });
+      ok('a natural date is normalised on the way in',
+         storedStart === '2019-07', storedStart);
+      // Every other section must be exactly as it was. A refused date write used
+      // to roll the profile back to a snapshot of a *string*, which turned the
+      // sections into character keys and wiped them.
+      var after = await fetch('/profile').then(function (r) { return r.json(); });
+      ok('the refused half-typed dates left the other sections alone',
+         M.count(after, 'skills') === M.count(profileBefore, 'skills')
+         && M.count(after, 'experience') === M.count(profileBefore, 'experience')
+         && after.contact.name === profileBefore.contact.name,
+         'skills ' + M.count(profileBefore, 'skills') + '->' + M.count(after, 'skills')
+         + ', experience ' + M.count(profileBefore, 'experience') + '->'
+         + M.count(after, 'experience')
+         + ', name ' + JSON.stringify(profileBefore.contact.name) + '->'
+         + JSON.stringify(after.contact.name));
+      ok('a natural date is normalised in the field itself',
+         !!committed && committed.value === '2019-07',
+         committed ? committed.value : 'no start box');
+      ok('and no error box for a date it can read',
+         dateErrors().length === errs0, dateErrors().join(' || ') || 'none');
+    }
+
+    /* ---- typing must not take the caret away -------------------------------
+     * Every text field used to lose focus after one character, so a word cost
+     * one click per letter. The cause was not the input event: it was the
+     * section redrawing itself afterwards. A rebuild replaces the input
+     * element, and the browser puts the caret on the document body. Only the
+     * writes that change the *shape* of a section may rebuild; a keystroke
+     * must never.
+     *
+     * Real key events, not a value assignment, because the bug is about focus
+     * and a synthetic value write never had the caret to lose in the first
+     * place. Checked on three kinds of field: a contact field, the multiline
+     * summary, and a bullet row inside an Experience entry. */
+    /* Seed by dispatching a real input event, the way a paste would, so the box
+     * and the model start in agreement. Assigning .value alone leaves the model
+     * holding the old text, and every later assertion compares the wrong pair. */
+    function typeInto(box, text, from) {
+      box.focus();
+      box.value = from || '';
+      if (from) box.dispatchEvent(new Event('input', { bubbles: true }));
+      var lost = null;
+      for (var i = 0; i < text.length; i += 1) {
+        var ch = text[i];
+        box.dispatchEvent(new KeyboardEvent('keydown', { key: ch, bubbles: true }));
+        // A real keystroke lands in the value before `input` fires; do it the
+        // way the browser would, then let the listener run.
+        box.value += ch;
+        box.dispatchEvent(new Event('input', { bubbles: true }));
+        if (document.activeElement !== box) {
+          lost = 'after "' + box.value + '" (wanted "' + text.slice(0, i + 1) + '")';
+          break;
+        }
+      }
+      return lost;
+    }
+
+    function fieldByLabel(winNode, labelText) {
+      return Array.from(winNode.querySelectorAll('.ed-field')).filter(function (f) {
+        return txt(f.querySelector('.ed-label')) === labelText;
+      }).map(function (f) { return f.querySelector('.ed-input'); })[0];
+    }
+
+    /* Every keystroke of a word, into each kind of field, asserting the same
+     * element still holds focus and the value came out whole. */
+    async function typingSurvives(sectionName, labelText, word, opts) {
+      var o = opts || {};
+      pickSection(sectionName);
+      await pause(200);
+      var box = fieldByLabel(edWin, labelText);
+      ok(sectionName + '/' + labelText + ' has a field to type into', !!box);
+      if (!box) return;
+      var seed = (o.from || '') + word;
+      var lost = typeInto(box, word, o.from);
+      ok(sectionName + '/' + labelText + ' keeps the caret for every key of "' + word + '"',
+         lost === null, lost || 'held all ' + word.length + ' keys');
+      ok(sectionName + '/' + labelText + ' ends up with the whole word',
+         box.value === seed, JSON.stringify(box.value));
+      ok(sectionName + '/' + labelText + ' still holds focus at the end',
+         document.activeElement === box,
+         document.activeElement ? document.activeElement.className || document.activeElement.tagName
+                                : 'nothing focused');
+    }
+
+    await typingSurvives('Contact', 'name', 'Anonymous', { from: 'An' });
+    await typingSurvives('Summary', 'Summary', 'Builds things', { from: '' });
+
+    /* A bullet lives inside an Experience entry, so the third kind of field
+     * needs that section and an entry to type into. */
+    pickSection('Experience');
+    await pause(200);
+    var orgBox = fieldByLabel(edWin, 'org');
+    ok('Experience has an org field to type into', !!orgBox);
+    if (orgBox) {
+      var lostOrg = typeInto(orgBox, 'Acme Systems');
+      ok('Experience/org keeps the caret for every key of "Acme Systems"',
+         lostOrg === null, lostOrg || 'held all keys');
+      ok('Experience/org ends up with the whole word',
+         orgBox.value === 'Acme Systems', JSON.stringify(orgBox.value));
+    }
+
+    /* And the value has to survive a round trip, not just stay in the box:
+     * a caret can be held by an input nobody wrote back. */
+    await pause(1600);
+    var typedBack = await fetch('/profile').then(function (r) { return r.json(); });
+    ok('the typed words reached the server, not just the box',
+       typedBack.contact.name === 'AnAnonymous'
+       && String(typedBack.summary || '').indexOf('Builds things') === 0,
+       'name ' + JSON.stringify(typedBack.contact.name)
+       + ', summary ' + JSON.stringify(String(typedBack.summary || '').slice(0, 30)));
 
   } catch (err) {
     ok('the harness ran to completion', false,

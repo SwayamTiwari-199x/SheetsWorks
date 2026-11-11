@@ -28,7 +28,7 @@ def client():
 @pytest.fixture
 def sheets_profile() -> Profile:
     return Profile.model_validate({
-        "contact": {"name": "Dusht", "email": "dusht@example.com", "phone": "+91 98765 43210"},
+        "contact": {"name": "Sample Applicant", "email": "anon@example.com", "phone": "+91 98765 43210"},
         "summary": "Backend engineer with 3 years in Python.",
         "interests": INTERESTS,
         "education": [{
@@ -88,6 +88,59 @@ def test_student_order_is_not_the_experienced_one() -> None:
 
         exp = rules.template_order(template, "experienced")
         assert exp.index("work_experience") < exp.index("education"), template
+
+
+# --- the date style is the template's, not a constant in the renderer -------
+
+
+def test_a_date_renders_in_the_templates_own_style() -> None:
+    from app.render.build import fmt_date
+
+    assert fmt_date("2022-07", "month_year") == "Jul 2022"
+    assert fmt_date("2022-07", "long_month") == "July 2022"
+    assert fmt_date("2022-07", "numeric") == "07/2022"
+    assert fmt_date("2022-07", "year_only") == "2022"
+    # A bare year has no month to print in any style but the last one.
+    assert fmt_date("2022", "month_year") == "2022"
+    assert fmt_date("Present", "long_month") == "Present"
+    assert fmt_date("Present", "numeric") == "Present"
+    assert fmt_date("", "month_year") == ""
+    # An unreadable value is printed as-is rather than becoming a blank, because
+    # a blank date reads as "nothing there", which is a different and wrong claim.
+    assert fmt_date("not a date", "month_year") == "not a date"
+
+
+def test_an_unknown_style_falls_back_instead_of_crashing_an_export() -> None:
+    """rules.json is data. A typo in it must not make every export fail."""
+    from app.render.build import fmt_date
+
+    assert fmt_date("2022-07", "klingon") == "Jul 2022"
+    assert rules.date_style("klingon") == "month_year"
+    assert rules.date_style(None) == "month_year"
+
+
+def test_the_ongoing_label_comes_from_rules_json() -> None:
+    assert rules.present_label() == "Present"
+
+
+def test_every_template_declares_a_date_style_that_exists() -> None:
+    known = {k for k in rules.date_styles() if not k.startswith("_") and k != "present_label"
+             and k != "present_label_note"}
+    for name in rules.template_names():
+        style = rules.template(name).get("date_style")
+        assert style in known, f"{name} declares a date style rules.json does not define"
+
+
+def test_the_dates_on_the_page_follow_the_template(monkeypatch, sheets_profile: Profile) -> None:
+    """A resume mixing 'Jul 2022' and '2022-07' looks careless, so the style is
+    applied everywhere from the one rule rather than per call site."""
+    data = load_rules()
+    data["resume_templates"]["sheets"]["date_style"] = "numeric"
+    monkeypatch.setattr(rules, "load_rules", lambda: data)
+
+    text = build_doc(sheets_profile, template="sheets").plain_text()
+    assert "07/2022" in text, text[:400]
+    assert "Jul 2022" not in text
 
 
 # --- what each template renders -------------------------------------------
@@ -186,27 +239,27 @@ def test_sheets_filename_is_first_last_resume(client: TestClient, sheets_profile
     """Its source is emphatic: never 'Final', a year, or a bracketed job title."""
     client.put("/profile", json=sheets_profile.model_dump(mode="json"))
     v = client.post("/versions/from-profile",
-                    params={"name": "Dusht Verma", "template": "sheets"}).json()
+                    params={"name": "Sample Applicant", "template": "sheets"}).json()
     disp = _disposition(client, v["id"], "pdf")
-    assert 'filename="Dusht Verma - Resume.pdf"' in disp
+    assert 'filename="Sample Applicant - Resume.pdf"' in disp
 
 
 def test_filename_never_carries_a_year_or_final() -> None:
     from app.main import _export_filename
     from app.models import Version
 
-    spec = Version(name="Dusht Verma", profile_snapshot=Profile.model_validate(
+    spec = Version(name="Sample Applicant", profile_snapshot=Profile.model_validate(
         {"contact": {"name": "D", "email": "a@b.com", "phone": "12345"}}), template="sheets")
-    assert _export_filename(spec, "pdf") == "Dusht Verma - Resume"
+    assert _export_filename(spec, "pdf") == "Sample Applicant - Resume"
 
 
 def test_single_word_name_does_not_crash() -> None:
     from app.main import _export_filename
     from app.models import Version
 
-    spec = Version(name="Dusht", profile_snapshot=Profile.model_validate(
+    spec = Version(name="Sample Applicant", profile_snapshot=Profile.model_validate(
         {"contact": {"name": "D", "email": "a@b.com", "phone": "12345"}}), template="sheets")
-    assert _export_filename(spec, "pdf") == "Dusht - Resume"
+    assert _export_filename(spec, "pdf") == "Sample Applicant - Resume"
 
 
 def test_symbol_only_name_falls_back_safely() -> None:

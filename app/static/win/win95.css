@@ -43,6 +43,13 @@
   --info-bg:     #ffffe1;  /* message box body                      */
   --disabled:    #808080;
   --field-bg:    #ffffff;
+  /* --text and --text-dim were referenced by .ai-factline, .ai-warn-line and
+     .ai-waiting without ever being defined here, so those rules resolved to
+     nothing and inherited whatever colour the parent had. Defined from the
+     sixteen system colours rather than invented: body text is the 3D dark
+     shadow, and dimmed helper text is the 3D shadow. */
+  --text:        #000000;
+  --text-dim:    #808080;
 
   /* ---- metrics -------------------------------------------------------- */
   --title-h: 18px;
@@ -693,6 +700,11 @@ textarea.ed-input { height: 64px; }
 .ed-bullet-t { flex: 1 1 auto; overflow-wrap: anywhere; }
 .ed-bullet .btn-icon { width: 16px; height: 16px; flex: 0 0 auto; font-size: 9px; }
 
+/* One list item per row, for skills items, project tech, coursework and links. */
+.ed-item { display: flex; align-items: baseline; gap: 6px; padding: 2px 0; font-size: 11px; }
+.ed-item-t { flex: 1 1 auto; overflow-wrap: anywhere; }
+.ed-item .btn-icon { width: 16px; height: 16px; flex: 0 0 auto; font-size: 9px; }
+
 .ed-sub { font-size: 11px; color: var(--dim); margin: 4px 0; overflow-wrap: anywhere; }
 
 .btn.ed-wide { width: 100%; margin-bottom: 6px; }
@@ -701,6 +713,33 @@ textarea.ed-input { height: 64px; }
 .ed-bullet-suggestion { border: 1px solid var(--btn-shadow); padding: 6px; background: var(--face); }
 .ed-bullet-actions { display: flex; gap: 6px; margin-top: 6px; justify-content: flex-end; }
 .ed-bullet-actions .btn { min-width: 60px; height: 18px; padding: 0 8px; font-size: 10px; }
+
+/* Which of the user's facts a suggestion is built from, and what it skipped. */
+.ai-factline { margin-top: 4px; font-size: 10px; color: var(--text-dim); }
+.ai-warn { margin: 8px 0; padding: 6px; border: 1px dashed var(--btn-shadow); background: var(--face); }
+.ai-warn-head { font-size: 10px; font-weight: bold; margin-bottom: 3px; }
+.ai-warn-line { font-size: 10px; color: var(--text-dim); }
+
+  /* The wait state. A provider call takes up to 80 seconds in practice, so the
+     only honest thing is to say that it is happening and roughly why. */
+  .ai-waiting {
+    display: flex; align-items: center; gap: 6px;
+    margin: 8px 0 4px; padding: 6px 8px;
+    background: var(--face); border: 1px solid var(--shadow);
+    font-size: 11px; color: var(--text);
+  }
+  .ai-waiting-icon { color: var(--text-dim); animation: ai-blink 1s steps(1) infinite; }
+  .ai-waiting-text { line-height: 1.35; }
+  .ai-waiting-failed {
+    background: var(--info-bg);
+    border: 1px solid var(--dark);
+    border-left: 3px solid var(--dark);
+  }
+  .ai-waiting-failed .ai-waiting-icon { color: var(--dark); animation: none; }
+  @keyframes ai-blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0.25; } }
+  @media (prefers-reduced-motion: reduce) {
+    .ai-waiting-icon { animation: none; }
+  }
 
 .ed-bar {
   flex: 0 0 auto;

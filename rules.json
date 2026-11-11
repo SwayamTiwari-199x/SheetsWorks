@@ -49,6 +49,15 @@
     "achievements_placement_note": "Position of Achievements for experienced candidates is our design decision, not a sourced rule. RULES.md section 3 lists the experienced order without it and does not cover the case. End of the resume is the conventional placement.",
     "tag": "verified"
   },
+  "date_styles": {
+    "_note": "The four display styles a template may pick. Stored dates are always canonical ('YYYY-MM', 'YYYY-MM-DD' or 'Present' -- see models.normalise_date); only the rendering differs, so every one of these styles is accepted on input without ambiguity. 'month_year' is the default because rules.json ats.layout_rules allows either form and both templates pick it today; switching a template to another style is this file's edit, not a code change.",
+    "month_year": "Jul 2026",
+    "long_month": "July 2026",
+    "numeric": "07/2026",
+    "year_only": "2026",
+    "present_label": "Present",
+    "present_label_note": "The wording for a role that has no end date. 'Present' is used because it is the form sheetsresume.com and most Indian and US templates use, and because it is a word rather than a second date, so nobody has to guess whether the role ended. Any of Present / Current / Now / Ongoing / Till date is accepted on input and all of them store as this one label (see models.PRESENT_WORDS)."
+  },
   "resume_templates": {
     "default": "sheets",
     "blank": {
@@ -57,6 +66,7 @@
       "include_summary": true,
       "include_interests": false,
       "filename_pattern": "{name}",
+      "date_style": "month_year",
       "tag": "verified",
       "note": "Mirrors section_order above, which is backed by cited sources."
     },
@@ -70,6 +80,7 @@
       "include_interests": true,
       "interests_label": "Interests:",
       "filename_pattern": "{name} - Resume",
+      "date_style": "month_year",
       "tag": "unverified",
       "source": "https://www.reddit.com/r/jobs/comments/1c1mqp0/ - u/SheetsGiggles, self-described former Fortune 100 recruiter; https://sheetsresume.com/advice",
       "note": "The source states plainly that a summary or objective 'will be skipped, and it's space that can be used better'. Adopted as the default template per decision (2). Source remains unverified (single source)."

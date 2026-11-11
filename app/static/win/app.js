@@ -80,9 +80,12 @@ async function api(path, opts) {
     body: o.body ? JSON.stringify(o.body) : undefined,
   });
   if (!res.ok) {
-    let detail = 'HTTP ' + res.status;
-    try { detail = (await res.json()).detail || detail; } catch (_) { /* not json */ }
-    const err = new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+    /* explainFailure, not JSON.stringify. A rejected save used to print
+       [{"type":"...","loc":["body","experience",0,"start"],"msg":"Value error, ..."}]
+       into a message box, which tells the person nothing about which box they
+       got wrong. It is declared further down this file, so the same reader that
+       un-breaks "[object Object]" now handles this too. */
+    const err = new Error(await explainFailure(res));
     err.status = res.status;
     throw err;
   }
@@ -844,20 +847,13 @@ function filenameFromResponse(res, fallback) {
    list of per-field objects for validation failures, which rendered as
    "[object Object]" before this existed -- so the one message that would have
    told the user which field is wrong was the one message nobody could read. */
-async function explainFailure(res) {
-  let body = null;
-  try { body = await res.json(); } catch (_) { /* not json */ }
-  if (!body) return 'HTTP ' + res.status;
-  const detail = body.detail;
-  if (typeof detail === 'string') return detail;
-  if (Array.isArray(detail)) {
-    return detail.map(function (d) {
-      const where = Array.isArray(d.loc) ? d.loc.slice(1).join('.') : '';
-      return (where ? where + ': ' : '') + (d.msg || JSON.stringify(d));
-    }).join('\n');
-  }
-  return 'HTTP ' + res.status;
-}
+/* Turning a failed response into words lives in failures.js, shared with
+   editor.js. One copy: the other one dropped the entry number and left
+   "Value error," at the front of the sentence, so the same 422 read two
+   different ways depending on which window ran it. */
+const explainFailure = window.Failures.explainFailure;
+const whereInPlainEnglish = window.Failures.whereInPlainEnglish;
+const say = window.Failures.say;
 
 async function doExport({ versionId, versionName, fmt, personal }) {
   let id = versionId;
@@ -1023,9 +1019,15 @@ function openEditor() {
   });
 }
 
+/* The name starts as 'Anon' rather than blank so that the export guard has
+   something to match on a genuinely fresh install. With a blank name the
+   'still Anon' refusal never fired, and the first export of a new install went
+   straight out under an empty filename. The field stays editable and the window
+   title shows whatever is in it, so this is a visible starting point rather
+   than a hidden default. */
 function emptyProfile() {
   return {
-    contact: { name: '', email: '', phone: '', city: '', country: '', links: [] },
+    contact: { name: 'Anon', email: '', phone: '', city: '', country: '', links: [] },
     summary: '', interests: '',
     education: [], experience: [], projects: [], skills: [],
     certifications: [], achievements: [], extracurriculars: [], publications: [],

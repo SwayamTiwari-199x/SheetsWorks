@@ -20,6 +20,44 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 PRESENT = "Present"
 
+# Everything a person actually types for "I am still here". Each normalises to
+# the single stored value `PRESENT`, so the renderer has one thing to match and a
+# resume cannot end up saying "Current - Ongoing".
+PRESENT_WORDS = {
+    "present", "current", "currently", "now", "ongoing", "till date",
+    "to date", "presently", "still", "todate", "till now", "to present",
+    "ongoing.", "present-", "to date.", "till now.", "present",
+    "still going", "still working", "to present.", "till present",
+}
+
+_MONTH_NAMES = {
+    "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3, "march": 3,
+    "apr": 4, "april": 4, "may": 5, "jun": 6, "june": 6, "jul": 7, "july": 7,
+    "aug": 8, "august": 8, "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10, "nov": 11, "november": 11, "dec": 12,
+    "december": 12,
+}
+
+# What a person actually types, so the field does not have to be ISO. Anything
+# here is normalised to "YYYY-MM" (or `PRESENT`) on the way in, so nothing
+# downstream has to know that "Jul 2026" and "2026-07" mean the same month.
+# A day, kept only when the user wrote one. The ordinal suffix ("26th") is
+# allowed because people write it and it carries no ambiguity.
+_DAY = r"(?:(?P<d1>0?[1-9]|[12]\d|3[01])(?:st|nd|rd|th)?\s*[-/.]\s*)?"
+
+_MONTH_FIRST_RE = re.compile(
+    r"^(?:"
+    r"(?P<mname>[A-Za-z]{3,9})\.?,?\s*[-/ ]?\s*(?P<y1>\d{4})"   # July 2026, Jul-2026
+    r"|(?P<y2>\d{4})\s*[-/. ]\s*(?P<mnum>0?[1-9]|1[0-2])"      # 2026-07, 2026/7
+    # The day goes here and only here. It is attached to the month-first numeric
+    # form so "07/2026" cannot be read as day 07 of month 2026 -- which it was,
+    # silently producing a bare year.
+    r"|" + _DAY + r"(?P<mon>0?[1-9]|1[0-2])\s*[-/.]\s*(?P<y3>\d{4})"  # 07/2026
+    r"|(?P<y4>\d{4})\s*[-/. ]\s*(?P<mname2>[A-Za-z]{3,9})"      # 2026 July
+    r"|(?P<y5>\d{4})"                                           # 2026
+    r")\.?$"
+)
+
 _MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 # Characters that must never reach a renderer. Tab and newline are allowed
@@ -45,37 +83,153 @@ def new_id() -> str:
     return uuid.uuid4().hex
 
 
-def validate_date_str(value: str, field: str) -> str:
-    """Accept YYYY-MM or YYYY-MM-DD (or the literal 'Present')."""
+DATE_HELP = (
+    "Write it as YYYY-MM (2026-07), or as July 2026 / Jul 2026 / 07/2026 / "
+    "2026 / 2026-07-15. For an ongoing role write Present, Current, Now, "
+    "Ongoing or Till date."
+)
+
+
+def normalise_date(value: str, field: str = "date") -> str:
+    """Accept what a person types; store one canonical form.
+
+    A date field that rejects "July 2026" gets "July 2026" typed into it anyway,
+    and the user is told to fix a value they believe is right. So the natural
+    forms are parsed here and stored as `YYYY-MM` (month precision, no invented
+    day) or as `PRESENT`.
+
+    Everything here is a normalisation, never a guess about what the user meant:
+    an unparseable value is rejected with an error that shows the accepted forms
+    rather than being turned into something plausible.
+    """
     if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{field} must be a non-empty string")
-    value = value.strip()
-    if value == PRESENT:
-        return value
+        raise ValueError(f"{field} must be a date, not blank. " + DATE_HELP)
+    raw = value.strip()
+    low = raw.lower().strip(" .")
+
+    if low in PRESENT_WORDS:
+        return PRESENT
+    if raw == PRESENT:
+        return PRESENT
+
+    if _MONTH_RE.match(raw):
+        return raw
+
+    # A full ISO date keeps its day: the user gave one.
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", raw):
+        try:
+            date.fromisoformat(raw)
+        except ValueError:
+            raise ValueError(
+                f"{raw!r} is not a real date ({field}). " + DATE_HELP
+            ) from None
+        return raw
+
+    m = _MONTH_FIRST_RE.match(raw)
+    if m:
+        g = m.groupdict()
+        if g.get("y5"):
+            # A bare year is a year, not January. Storing 2026-01 would print a
+            # month the user never wrote.
+            return g["y5"]
+
+        month: int | None = None
+        if g.get("mnum"):
+            month = int(g["mnum"])
+        elif g.get("mon"):
+            month = int(g["mon"])
+        else:
+            name = (g.get("mname") or g.get("mname2") or "").lower().rstrip(".")
+            month = _MONTH_NAMES.get(name)
+        year = g.get("y1") or g.get("y2") or g.get("y3") or g.get("y4")
+        if month and year:
+            if not 1 <= month <= 12:
+                # "13/2026" reads as month 13 to the regex. Rejected rather than
+                # wrapped into January, which would be a date nobody typed.
+                raise ValueError(
+                    f"{raw!r} has {month} as its month ({field}). " + DATE_HELP
+                )
+            if g.get("d1"):
+                # The user wrote a day, so it is kept -- but only if the whole
+                # date is real. "31/02/2026" is rejected rather than rolled over.
+                iso = f"{int(year):04d}-{month:02d}-{int(g['d1']):02d}"
+                try:
+                    date.fromisoformat(iso)
+                except ValueError:
+                    raise ValueError(
+                        f"{raw!r} is not a real date ({field}). " + DATE_HELP
+                    ) from None
+                return iso
+            return f"{int(year):04d}-{month:02d}"
+
+    raise ValueError(
+        f"{raw!r} is not a date I can read ({field}). " + DATE_HELP
+    )
+
+
+def validate_date_str(value: str, field: str) -> str:
+    """Accept the natural forms and the ISO ones; store the canonical one."""
+    return normalise_date(value, field)
+
+
+def _as_comparable(value: str) -> date:
+    """Widen a stored date to a real date for comparison only.
+
+    A bare year and a month-precision value both become the first day of the
+    earliest thing they could mean. That is not a claim about the date -- the
+    stored value keeps the precision the user typed -- it just makes "did these
+    two overlap" answerable. Used only for the ordering check.
+    """
     if _MONTH_RE.match(value):
-        return value
-    try:
-        date.fromisoformat(value)
-    except ValueError:
-        raise ValueError(
-            f"{field} must be 'YYYY-MM', 'YYYY-MM-DD', or 'Present'; got {value!r}"
-        ) from None
-    return value
+        value = f"{value}-01"
+    elif re.match(r"^\d{4}$", value):
+        value = f"{value}-01-01"
+    return date.fromisoformat(value)
+
+
+def _as_range_point(value: str) -> date:
+    """A date for comparing a range, with the open end sorted after every real
+    date.
+
+    `Present` is what an ongoing role ends with, so it names a position rather
+    than a day. `date.max` gives it one that needs no special case in the
+    comparison below, which is the whole point: an earlier version only treated
+    the *end* as open, so a start of `Present` fell through to the ISO parser
+    and was refused by the very range check meant to make sense of it.
+    """
+    if value.strip().lower() in PRESENT_WORDS:
+        return date.max
+    return _as_comparable(value)
 
 
 def validate_date_range(start: str, end: str | None) -> None:
-    """end must be 'Present'/None or strictly after start."""
-    if not end or end == PRESENT:
+    """end must be 'Present'/None or not before start.
+
+    A range that opens with the open end and closes on a real date is
+    contradictory -- still going, but finished -- and it is nearly always the two
+    dates typed the wrong way round. The message says so, because a generic
+    "comes before" sends people to look at the wrong field.
+    """
+    if not end:
         return
-    s = f"{start}-01" if _MONTH_RE.match(start) else start
-    e = f"{end}-01" if _MONTH_RE.match(end) else end
     try:
-        sd = date.fromisoformat(s)
-        ed = date.fromisoformat(e)
+        sd = _as_range_point(start)
+        ed = _as_range_point(end)
     except ValueError:
-        raise ValueError(f"unparseable date range: {start!r} .. {end!r}") from None
+        raise ValueError(
+            f"{start!r} .. {end!r} is not a date range I can read. " + DATE_HELP
+        ) from None
     if ed < sd:
-        raise ValueError(f"end date {end!r} must not be before start date {start!r}")
+        if sd == date.max:
+            raise ValueError(
+                f"the start date {start!r} means 'still going', but the end date "
+                f"{end!r} is a real day. If the role is current, put the start "
+                f"month in start and {PRESENT!r} in end. If it has ended, "
+                f"the end date belongs in start and the start date in end."
+            )
+        raise ValueError(
+            f"the end date {end!r} comes before the start date {start!r}"
+        )
 
 
 class StrictModel(BaseModel):

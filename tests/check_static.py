@@ -46,7 +46,8 @@ check(not missing, f"code asks for ids the markup lacks: {missing}")
 
 # Scripts must load in dependency order: the model and the form before the app
 # that opens them, or boot throws a ReferenceError.
-order = ["shell.js", "sample.js", "editor-model.js", "editor.js", "app.js"]
+order = ["shell.js", "sample.js", "editor-model.js", "failures.js",
+         "editor.js", "app.js"]
 positions = []
 for name in order:
     tag = f'src="/static/win/{name}"'

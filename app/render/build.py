@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import date
 
 from .. import rules
-from ..models import Profile, Version
+from ..models import PRESENT_WORDS, Profile, Version
 from .doc import Doc, Entry, Section
 
 MONTHS = [
@@ -17,23 +17,47 @@ MONTHS = [
     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ]
 
+LONG_MONTHS = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+]
 
-def fmt_date(value: str | None) -> str:
-    """'2022-07' -> 'Jul 2022'. Never an apostrophe year: RULES.md section 2."""
+
+def fmt_date(value: str | None, style: str = "month_year") -> str:
+    """Render a stored date in the template's date style.
+
+    '2022-07' -> 'Jul 2022'. Never an apostrophe year: RULES.md section 2.
+
+    `style` comes from rules.json (`resume_templates.<name>.date_style`) so the
+    style is a rule, not a constant in a renderer. Anything unrecognised falls
+    back to `month_year`, and an unparseable value is returned unchanged rather
+    than becoming an empty string -- a blank date on a resume reads as "nothing
+    there", which is a different and wrong claim.
+    """
     if not value:
         return ""
-    if value == "Present":
-        return "Present"
+    # Stored values are canonical, but a Version row written by an older build
+    # (or by hand) can still hold "current". Compare case-insensitively rather
+    # than trusting the writer.
+    if value.strip().lower() in PRESENT_WORDS:
+        return rules.present_label()
     parts = value.split("-")
     if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
         idx = int(parts[1]) - 1
         if 0 <= idx < 12:
-            return f"{MONTHS[idx]} {parts[0]}"
+            year, month = parts[0], MONTHS[idx]
+            if style == "numeric":
+                return f"{parts[1]}/{parts[0]}"
+            if style == "year_only":
+                return year
+            if style == "long_month":
+                return f"{LONG_MONTHS[idx]} {year}"
+            return f"{month} {year}"
     return value
 
 
-def fmt_range(start: str | None, end: str | None) -> str:
-    a, b = fmt_date(start), fmt_date(end)
+def fmt_range(start: str | None, end: str | None, style: str = "month_year") -> str:
+    a, b = fmt_date(start, style), fmt_date(end, style)
     if a and b:
         return f"{a} - {b}"
     return a or b
@@ -90,6 +114,10 @@ def build_doc(
     level = detect_level(profile)
     spec = rules.template(template)
     order = rules.template_order(template, level)
+    # The date style is the template's too: 'Jan 2024' and '2024-01' are both
+    # acceptable to a reader but a resume mixing them looks careless, so it is
+    # one rule applied everywhere rather than a per-call argument.
+    date_style = rules.date_style(spec.get("date_style"))
 
     # group work vs internships so both can occupy their own slot
     jobs = [e for e in profile.experience if e.type == "job"]
@@ -117,7 +145,7 @@ def build_doc(
             entries.append(
                 Entry(
                     header=f"{e.role}, {e.org}",
-                    meta=fmt_range(e.start, e.end),
+                    meta=fmt_range(e.start, e.end, date_style),
                     bullets=_bullets(e.bullets),
                 )
             )
@@ -141,7 +169,11 @@ def build_doc(
         [
             Entry(
                 header=f"{p.name}" + (f", {p.role}" if p.role else ""),
-                meta=" | ".join(x for x in [", ".join(p.tech), fmt_range(p.start, p.end)] if x),
+                meta=" | ".join(
+                    x
+                    for x in [", ".join(p.tech), fmt_range(p.start, p.end, date_style)]
+                    if x
+                ),
                 bullets=_bullets(p.bullets),
             )
             for p in profile.projects
@@ -158,7 +190,7 @@ def build_doc(
                 meta=" | ".join(
                     x
                     for x in [
-                        fmt_range(e.start, e.end),
+                        fmt_range(e.start, e.end, date_style),
                         (f"{e.grade.value}/{e.grade.scale}" if e.grade else ""),
                         (f"Coursework: {', '.join(e.coursework)}" if e.coursework else ""),
                     ]
@@ -184,7 +216,9 @@ def build_doc(
         return [
             Entry(
                 header=i.name,
-                meta=" | ".join(x for x in [i.issuer, fmt_date(i.date)] if x),
+                meta=" | ".join(
+                    x for x in [i.issuer, fmt_date(i.date, date_style)] if x
+                ),
             )
             for i in items
             if i.name

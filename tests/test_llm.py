@@ -7,13 +7,21 @@ from __future__ import annotations
 
 import json
 
+import httpx
 import pytest
 
 from app.config import OPENAI_COMPAT_BASE_URLS, PROVIDERS, Settings
-from app.llm import LLMError, ask, extract_json, schema_prompt
+from app.llm import (
+    LLMError,
+    _raise_token_limit,
+    ask,
+    extract_json,
+    is_retryable_status,
+    schema_prompt,
+)
 from pydantic import BaseModel, Field
 
-from .fakes import FakeClient
+from .fakes import FakeClient, FakeResponse
 
 # An arbitrary, obviously-fake model id used wherever a test needs a model set
 # without caring which one. Deliberately shaped like an OpenRouter id
@@ -339,6 +347,341 @@ def test_gemini_default_model_is_not_retired() -> None:
     """gemini-2.5-flash was withdrawn for new accounts and 404'd."""
     s = Settings(llm_provider="gemini", _env_file=None)
     assert s.llm_model == "gemini-3.8-flash"
+
+
+# --- a rejected request is not retried, only 429 is -----------------------
+
+
+def test_a_400_from_the_provider_is_not_retried() -> None:
+    """Sending the identical request again cannot make a 400 succeed.
+
+    The real case: OpenRouter rejected the /assist/answer request, the retry
+    spent a second call to be rejected identically, and the user saw a message
+    about unparseable JSON that had nothing to do with the 400.
+    """
+    client = FakeClient(
+        replies=['{"error":{"message":"No endpoints found that match your input"}}'],
+        status_code=400,
+    )
+    with pytest.raises(LLMError) as excinfo:
+        ask(Out, "hello", settings=settings_for("openrouter", llm_model=MODEL), client=client)
+    assert client.call_count == 1, "a 4xx was retried"
+    assert excinfo.value.status_code == 400
+
+
+def test_a_429_is_retried_because_it_means_not_now() -> None:
+    class Alternating(FakeClient):
+        def post(self, url, *, headers, json):
+            self.calls.append({"url": url, "headers": headers, "json": json})
+            if len(self.calls) == 1:
+                return FakeResponse({"error": {"message": "rate limit"}}, 429, url)
+            body = '{"answer": "ok"}'
+            return FakeResponse(
+                {"choices": [{"message": {"role": "assistant", "content": body}}]},
+                200, url,
+            )
+
+    client = Alternating()
+    out = ask(Out, "hello", settings=settings_for("openrouter", llm_model=MODEL), client=client)
+    assert out.answer == "ok"
+    assert client.call_count == 2
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 404, 422])
+def test_only_429_is_retryable_among_the_4xx(status: int) -> None:
+    assert is_retryable_status(status) is False
+
+
+def test_5xx_and_transport_failures_stay_retryable() -> None:
+    assert is_retryable_status(500) is True
+    assert is_retryable_status(503) is True
+    assert is_retryable_status(None) is False
+
+
+def test_the_providers_error_body_is_kept_not_just_the_status() -> None:
+    """The provider names the field it rejected. 'HTTP 400' does not."""
+    client = FakeClient(
+        replies=['max_tokens must be greater than 0'],
+        status_code=400,
+    )
+    with pytest.raises(LLMError) as excinfo:
+        ask(Out, "hi", settings=settings_for("openrouter", llm_model=MODEL), client=client)
+    assert "max_tokens must be greater than 0" in excinfo.value.detail
+    assert "check LLM_MODEL" in excinfo.value.hint
+
+
+def test_a_non_json_error_body_is_still_captured() -> None:
+    """Not every provider answers a rejection with JSON."""
+    class TextOnly(FakeClient):
+        def post(self, url, *, headers, json):
+            self.calls.append({"url": url, "headers": headers, "json": json})
+            return httpx.Response(
+                400,
+                text="upstream: invalid max_tokens",
+                request=httpx.Request("POST", url),
+            )
+
+    with pytest.raises(LLMError) as excinfo:
+        ask(Out, "hi", settings=settings_for("openrouter", llm_model=MODEL), client=TextOnly())
+    assert "invalid max_tokens" in excinfo.value.detail
+
+
+def test_the_key_is_redacted_out_of_a_provider_error_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A provider that echoes the Authorization header must not put the key in
+    a log line or in the dialog the user pastes into a bug report."""
+    secret = "sk-or-v1-SUPERSECRETVALUE"
+    monkeypatch.setenv("OPENROUTER_API_KEY", secret)
+    client = FakeClient(
+        replies=[f'bad request; Authorization: Bearer {secret}'],
+        status_code=400,
+    )
+    with pytest.raises(LLMError) as excinfo:
+        ask(Out, "hi", settings=settings_for("openrouter", llm_model=MODEL), client=client)
+    assert secret not in excinfo.value.detail
+    assert "<redacted>" in excinfo.value.detail
+
+
+def test_a_4xx_body_is_written_to_the_log(monkeypatch, tmp_path) -> None:
+    """The diagnosis has to survive the process, so it goes to logs/llm.log."""
+    monkeypatch.setenv("LOG_DIR", str(tmp_path))
+    client = FakeClient(replies=["max_tokens is too large"], status_code=400)
+    with pytest.raises(LLMError):
+        ask(
+            Out,
+            "hi",
+            settings=settings_for("openrouter", llm_model=MODEL, log_dir=str(tmp_path)),
+            client=client,
+        )
+    log = (tmp_path / "llm.log").read_text(encoding="utf-8")
+    assert "llm.http_error" in log
+    assert "max_tokens is too large" in log
+    assert '"status_code": 400' in log
+    assert '"retryable": false' in log
+
+
+# --- how long each call took -------------------------------------------------
+# The last real run spent 80 seconds across three truncated attempts and the log
+# could not say which call was slow, so "the AI is slow" and "the model spent its
+# whole budget reasoning" looked identical. Every call is now timed, including
+# the ones that failed and the ones that were thrown away.
+
+
+def test_a_successful_call_logs_how_long_it_took(tmp_path) -> None:
+    client = FakeClient(replies=['{"answer": "ok"}'])
+    ask(Out, "hi", settings=settings_for("openrouter", llm_model=MODEL,
+                                         log_dir=str(tmp_path)), client=client)
+    log = (tmp_path / "llm.log").read_text(encoding="utf-8")
+    ok_line = [ln for ln in log.splitlines() if "llm.ok" in ln]
+    assert ok_line, log
+    assert '"elapsed_ms"' in ok_line[-1], ok_line[-1]
+    assert '"total_ms"' in ok_line[-1], ok_line[-1]
+    # A number, not a placeholder: the point is to be able to read the duration.
+    elapsed = int(ok_line[-1].split('"elapsed_ms":')[1].split(",")[0].strip())
+    assert elapsed >= 0
+
+
+def test_the_provider_token_counts_are_logged_too(tmp_path) -> None:
+    """Prompt and completion tokens are what explains a slow reply, and the
+    model refuses to be asked about them after the fact."""
+    class WithUsage(FakeClient):
+        def post(self, url, *, headers, json):
+            self.calls.append({"url": url, "headers": headers, "json": json})
+            return FakeResponse(
+                {
+                    "choices": [{"finish_reason": "stop",
+                                 "message": {"content": '{"answer": "ok"}'}}],
+                    "usage": {"prompt_tokens": 812, "completion_tokens": 143},
+                },
+                200, url,
+            )
+
+    client = WithUsage()
+    ask(Out, "hi", settings=settings_for("openrouter", llm_model=MODEL,
+                                         log_dir=str(tmp_path)), client=client)
+    log = (tmp_path / "llm.log").read_text(encoding="utf-8")
+    ok_line = [ln for ln in log.splitlines() if "llm.ok" in ln][-1]
+    assert '"prompt_tokens": 812' in ok_line, ok_line
+    assert '"completion_tokens": 143' in ok_line, ok_line
+
+
+def test_a_failed_call_is_timed_too(tmp_path) -> None:
+    """A failure that arrived instantly and one that arrived after 30 seconds
+    are different problems, and the log line is what tells them apart."""
+    class Slow(FakeClient):
+        def post(self, url, *, headers, json):
+            self.calls.append({"url": url, "headers": headers, "json": json})
+            import time as _t
+            _t.sleep(0.05)
+            return FakeResponse({"error": {"message": "overloaded"}}, 503, url)
+
+    client = Slow()
+    with pytest.raises(LLMError):
+        ask(Out, "hi", settings=settings_for("openrouter", llm_model=MODEL,
+                                             log_dir=str(tmp_path)), client=client)
+    log = (tmp_path / "llm.log").read_text(encoding="utf-8")
+    line = [ln for ln in log.splitlines() if "llm.http_error" in ln][-1]
+    assert '"elapsed_ms"' in line, line
+    elapsed = int(line.split('"elapsed_ms":')[1].split(",")[0].strip())
+    assert elapsed >= 45, f"a 50ms call logged as {elapsed}ms: {line}"
+
+
+def test_a_truncated_call_is_timed_because_it_is_the_slow_one(tmp_path) -> None:
+    """It used the whole token allowance before saying nothing. A log that only
+    recorded successful calls would make the 80-second run look instant."""
+
+    class Truncating(FakeClient):
+        def post(self, url, *, headers, json):
+            self.calls.append({"url": url, "headers": headers, "json": json})
+            limit = json["max_tokens"]
+            if limit == 2048:
+                return FakeResponse(
+                    {"choices": [{"finish_reason": "length",
+                                  "message": {"content": None}}]}, 200, url)
+            return FakeResponse(
+                {"choices": [{"finish_reason": "stop",
+                              "message": {"content": '{"answer": "ok"}'}}]},
+                200, url)
+
+    client = Truncating()
+    ask(Out, "hi", settings=settings_for("openrouter", llm_model=MODEL,
+                                         log_dir=str(tmp_path)), client=client)
+    log = (tmp_path / "llm.log").read_text(encoding="utf-8")
+    trunc = [ln for ln in log.splitlines() if "llm.truncated" in ln]
+    assert trunc, log
+    assert '"elapsed_ms"' in trunc[-1], trunc[-1]
+    assert '"total_ms"' in trunc[-1], trunc[-1]
+    # The second llm.ok line carries the running total across both calls.
+    oks = [ln for ln in log.splitlines() if "llm.ok" in ln]
+    assert '"total_ms"' in oks[-1], oks[-1]
+
+
+def test_the_second_attempt_says_how_long_the_first_one_took(tmp_path) -> None:
+    """So a stall can be attributed to the call that caused it."""
+
+    class BadThenGood(FakeClient):
+        def post(self, url, *, headers, json):
+            self.calls.append({"url": url, "headers": headers, "json": json})
+            if len(self.calls) == 1:
+                return FakeResponse({"choices": [{"finish_reason": "stop",
+                                                  "message": {"content": "not json"}}]}, 200, url)
+            return FakeResponse(
+                {"choices": [{"finish_reason": "stop",
+                              "message": {"content": '{"answer": "ok"}'}}]},
+                200, url)
+
+    client = BadThenGood()
+    ask(Out, "hi", settings=settings_for("openrouter", llm_model=MODEL,
+                                         log_dir=str(tmp_path)), client=client)
+    log = (tmp_path / "llm.log").read_text(encoding="utf-8")
+    second = [ln for ln in log.splitlines()
+              if "llm.request" in ln and '"attempt": 2' in ln]
+    assert second, log
+    assert '"spent_ms"' in second[-1], second[-1]
+
+
+# --- a truncated reply raises the limit, it does not burn the parse retry --
+
+
+def test_a_reply_that_ran_out_of_tokens_is_not_reported_as_bad_json() -> None:
+    """The real failure: a reasoning model spent all 2048 tokens thinking and
+    returned content=null. That is not 'unparseable JSON', and repeating the
+    prompt at the same limit would be cut off in exactly the same place."""
+    class Truncating(FakeClient):
+        def post(self, url, *, headers, json):
+            self.calls.append({"url": url, "headers": headers, "json": json})
+            limit = json["max_tokens"]
+            if limit == 2048:
+                return FakeResponse(
+                    {"choices": [{"finish_reason": "length",
+                                  "message": {"content": None, "reasoning": "..."}}]},
+                    200, url,
+                )
+            return FakeResponse(
+                {"choices": [{"finish_reason": "stop",
+                              "message": {"content": '{"answer": "ok"}'}}]},
+                200, url,
+            )
+
+    client = Truncating()
+    settings = settings_for("openrouter", llm_model=MODEL)
+    out = ask(Out, "hello", settings=settings, client=client)
+    assert out.answer == "ok"
+    assert client.call_count == 2
+    # The second call must actually carry the bigger allowance.
+    assert client.calls[0]["json"]["max_tokens"] == 2048
+    assert client.calls[1]["json"]["max_tokens"] == 4096
+
+
+def test_the_token_limit_doubles_and_then_stops() -> None:
+    class AlwaysTruncates(FakeClient):
+        def post(self, url, *, headers, json):
+            self.calls.append({"url": url, "headers": headers, "json": json})
+            return FakeResponse(
+                {"choices": [{"finish_reason": "length",
+                              "message": {"content": None, "reasoning": "..."}}]},
+                200, url,
+            )
+
+    client = AlwaysTruncates()
+    with pytest.raises(LLMError) as excinfo:
+        ask(Out, "hello", settings=settings_for("openrouter", llm_model=MODEL),
+            client=client)
+    # Two attempts, not one-per-doubling: the live budget is not open-ended.
+    assert client.call_count == 2
+    assert "raising the token limit" in str(excinfo.value)
+    assert "LLM_MAX_TOKENS" in str(excinfo.value)
+
+
+def test_the_token_limit_has_a_ceiling() -> None:
+    settings = settings_for("openrouter", llm_model=MODEL, llm_max_tokens=16384)
+    assert _raise_token_limit(settings) is False
+    assert settings.llm_max_tokens == 16384
+    settings = settings_for("openrouter", llm_model=MODEL, llm_max_tokens=12000)
+    assert _raise_token_limit(settings) is True
+    assert settings.llm_max_tokens == 16384
+
+
+def test_a_truncated_reply_with_some_text_is_not_raised_away() -> None:
+    """finish_reason=length with real content is a long answer, not a failure.
+
+    Treating it as a failure would discard a usable reply and spend a call.
+    """
+    class PartialButUsable(FakeClient):
+        def post(self, url, *, headers, json):
+            self.calls.append({"url": url, "headers": headers, "json": json})
+            return FakeResponse(
+                {"choices": [{"finish_reason": "length",
+                              "message": {"content": '{"answer": "ok"}'}}]},
+                200, url,
+            )
+
+    client = PartialButUsable()
+    out = ask(Out, "hi", settings=settings_for("openrouter", llm_model=MODEL),
+              client=client)
+    assert out.answer == "ok"
+    assert client.call_count == 1
+
+
+def test_anthropic_max_tokens_is_raised_too() -> None:
+    class AnthropicTruncating(FakeClient):
+        def post(self, url, *, headers, json):
+            self.calls.append({"url": url, "headers": headers, "json": json})
+            if json["max_tokens"] == 2048:
+                return FakeResponse({"stop_reason": "max_tokens", "content": []},
+                                    200, url)
+            return FakeResponse(
+                {"stop_reason": "end_turn",
+                 "content": [{"type": "text", "text": '{"answer": "ok"}'}]},
+                200, url,
+            )
+
+    client = AnthropicTruncating()
+    out = ask(Out, "hi", settings=settings_for("anthropic", llm_model="m"),
+              client=client)
+    assert out.answer == "ok"
+    assert client.calls[1]["json"]["max_tokens"] == 4096
 
 
 def test_no_credential_leaks_into_error_detail() -> None:

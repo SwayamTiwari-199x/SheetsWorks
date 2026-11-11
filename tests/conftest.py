@@ -30,6 +30,12 @@ for var in _PRE_IMPORT_SCRUB:
 from app import config, db  # noqa: E402
 from app.models import Profile  # noqa: E402
 
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers", "live: hits a real provider; only runs with RUN_LIVE_LLM=1"
+    )
+
 # Anything the developer's real environment might set. pydantic-settings always
 # reads the process environment and `_env_file=None` does NOT disable that, so
 # these must be cleared explicitly or tests become machine-dependent.
@@ -69,6 +75,68 @@ def isolated_llm_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     config.get_settings.cache_clear()
 
 
+import socket as _socket
+
+# Captured at import, before any fixture gets a chance to patch it. Holding the
+# real function rather than calling `socket.socket.connect` from inside the guard
+# would be calling the patched one.
+_REAL_CONNECT = _socket.socket.connect
+
+
+@pytest.fixture(autouse=True)
+def no_outbound_network(
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> Iterator[None]:
+    """Make a real HTTP request from a test an error, not a surprise.
+
+    This is not paranoia. `test_the_400_that_the_user_saw_is_gone` posted a
+    well-formed body to the live provider on every suite run: conftest scrubs the
+    API key, so it cost one real request per run and got a 401 back, and the
+    request count was only noticed by counting `llm.request` lines in
+    logs/llm.log by hand.
+
+    Loopback is allowed through: `TestClient` drives the app in-process but the
+    event loop and the ASGI portal still touch 127.0.0.1, and blocking that broke
+    every route test. A provider call never goes to loopback, so nothing real is
+    let past.
+
+    The live tests opt back in with `@pytest.mark.live`. Everything else is
+    expected to fake the client, and this makes that expectation enforceable
+    rather than a convention.
+    """
+    if request.node.get_closest_marker("live"):
+        yield
+        return
+
+    import ipaddress
+    import socket
+
+    def _is_loopback(address: object) -> bool:
+        host = address[0] if isinstance(address, tuple) else address
+        if not isinstance(host, str):
+            return False
+        try:
+            return ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            return host in ("localhost", "localhost.localdomain")
+
+    def blocked(self, address, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if _is_loopback(address):
+            return _REAL_CONNECT(self, address, *args, **kwargs)
+        host = address[0] if isinstance(address, tuple) else address
+        raise AssertionError(
+            f"a test opened a real connection to {host!r}. Fake the httpx "
+            "client, or mark the test @pytest.mark.live and set RUN_LIVE_LLM."
+        )
+
+    monkeypatch.setattr(socket.socket, "connect", blocked)
+    monkeypatch.setattr(socket.socket, "connect_ex", blocked)
+    try:
+        yield
+    finally:
+        monkeypatch.undo()
+
+
 @pytest.fixture(autouse=True)
 def temp_db(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
     """Give every test its own DB file and log dir."""
@@ -91,14 +159,14 @@ def sample_profile_payload() -> dict:
     return Profile.model_validate(
         {
             "contact": {
-                "name": "Dusht",
-                "email": "dusht@example.com",
+                "name": "Anon",
+                "email": "anon@example.com",
                 "phone": "+91 98765 43210",
                 "city": "Bengaluru",
                 "country": "India",
                 "links": [
-                    {"label": "GitHub", "url": "https://github.com/dusht"},
-                    {"label": "LinkedIn", "url": "https://linkedin.com/in/dusht"},
+                    {"label": "GitHub", "url": "https://example.org"},
+                    {"label": "LinkedIn", "url": "https://example.org"},
                 ],
             },
             "summary": (
@@ -147,7 +215,7 @@ def sample_profile_payload() -> dict:
                 {
                     "name": "Staffing Scheduler",
                     "role": "Solo build",
-                    "links": [{"label": "GitHub", "url": "https://github.com/dusht/scheduler"}],
+                    "links": [{"label": "GitHub", "url": "https://example.org/scheduler"}],
                     "start": "2021-01",
                     "end": "2021-06",
                     "tech": ["FastAPI", "Postgres", "Celery"],

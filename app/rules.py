@@ -121,6 +121,30 @@ def template(name: str | None = None) -> dict:
     return templates[chosen]
 
 
+def date_styles() -> dict[str, str]:
+    """The display styles a template may choose, with an example of each."""
+    return dict(load_rules()["date_styles"])
+
+
+def date_style(name: str | None) -> str:
+    """The style for a template, falling back to month_year for a bad name.
+
+    Falling back rather than raising: rules.json is data and a typo in it must
+    not make every export fail. An unknown style renders as month_year, which is
+    the form rules.json already permits.
+    """
+    known = date_styles()
+    known.pop("_note", None)
+    known.pop("present_label", None)
+    known.pop("present_label_note", None)
+    return name if name in known else "month_year"
+
+
+def present_label() -> str:
+    """How an ongoing role is printed. From rules.json, not hardcoded."""
+    return load_rules()["date_styles"].get("present_label", "Present")
+
+
 def template_order(name: str | None, level: str) -> list[str]:
     spec = template(name)
     key = "student_fresher" if level == "student" else "experienced"

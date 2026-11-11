@@ -51,7 +51,7 @@ Templates are **data in `rules.json`, never conditionals in the renderer** — C
 | Summary | printed | hidden |
 | Interests | not printed | printed last, one line |
 | Page budget | 2 (experienced) | 1, whatever the level |
-| Filename | `Dusht Verma.pdf` | `Dusht Verma Resume.pdf` |
+| Filename | `<name>.pdf` | `<name> - Resume.pdf` |
 
 The two sources genuinely disagree about summaries. That is recorded, not silently resolved: `rules.json` carries a `why_not_merge` note, RULES.md §3a documents the conflict with honest `unverified` tags, and the user picks. Switching templates never deletes anything — the summary and interests stay in the profile and are merely not printed. `profile` gained a `printed` yes/no column so this is never a surprise.
 
@@ -348,8 +348,8 @@ tested rule rather than a thing that happens to work:
    `global` parameter, and browsers do not define a `global`. A ReferenceError
    during boot, so the desktop never came up. The harness reported it in one
    line: "boot never completed".
-5. **The form showed every section as empty while the title bar read "Dusht
-   Verma."** `app.js` and `editor.js` each held their own reference to the
+5. **The form showed every section as empty while the title bar read the
+   placeholder name.** `app.js` and `editor.js` each held their own reference to the
    profile; the app reloaded it from the server on boot and the form kept the
    empty object it was opened with. `refresh()` now adopts the new profile, and
    a test asserts every caller passes it. Found by screenshotting — no assertion
@@ -489,12 +489,181 @@ Anyone else cloning this repo would have got none of it. The sources now live in
 `tools/` and are tracked; `out/` holds only generated artefacts.
 
 ```
-tools\run-ui-verify.ps1 <port>   # 156 browser checks
-tools\verify_api.py <port>       # 110 API checks
+tools\run-ui-verify.ps1 <port>   # 179 browser checks
+tools\verify_api.py <port>       # 112 API checks
 tools\shot.ps1 -Port N -Name X -Open editor
 tools\free-ports.ps1
 tools\_pdfctl2.html              # why preview screenshots are black
 ```
+
+### Stage 4: AI assist, and the three defects behind it
+
+`app/assist.py` + `prompts/write_bullets.md`, `POST /assist/{section}` (extract and
+ask clarifying questions) and `POST /assist/answer` (write bullets), reached from
+"Tell the AI..." on Experience / Projects / Achievements. Education and Contact
+are structure-only by decision. **493 tests pass, 2 skipped.**
+
+**The 400 was ours, not the provider's.** `/assist/{section}` was declared before
+`/assist/answer`, so the literal path was captured by the section handler and
+rejected with `free_text is required`. No provider call was ever made; the
+diagnosis took a full round because the failure read exactly like a provider
+error. Route order is now pinned by a test, because nothing else would catch it.
+
+**One test was spending a live request per run.** `test_the_400_that_the_user_saw_is_gone`
+posted a well-formed body to the real provider. conftest scrubs the API key, so it
+got a 401 and taught us nothing — but it was a real HTTP request, once per suite
+run, and it was only noticed by counting `llm.request` lines in `logs/llm.log` by
+hand. Fixed at the root rather than the test: an autouse fixture now raises on any
+non-loopback `socket.connect`, with `@pytest.mark.live` as the only opt-in. The
+real-call count is a property of the suite, not a promise. Two tests pin the guard
+itself, including that loopback still works (`TestClient` needs it).
+
+**Overlapping facts, fixed at both ends.** The one live run turned 7 lines into 7
+"facts" where two said the same thing, because the answers block restated a line
+the user had already typed and the user's own `1.` markers were being read as fact
+text. `split_facts` now strips the marker and merges a line whose tokens are
+contained in the one above it, keeping the longer wording. The prompt says a fact
+id may appear in at most one bullet unless the fact is a bare figure.
+`shared_facts` reports ids cited by more than one non-metric bullet, as a visible
+warning beside the existing unused-facts and reused-metrics ones. Regression tests
+use the exact input that failed, and `shared_facts` is now in the response body so
+the rule is exercised end to end.
+
+**A slow call used to look like a frozen dialog.** The live run took 80 seconds and
+spent three provider calls, because a truncated reply makes the server raise
+`max_tokens` and retry. Nothing on screen said so — the buttons were just disabled.
+`callAssist` in `editor.js` now owns both AI calls: a visible waiting line
+("Asking the AI… a second pass happens if the reply runs out of room"), an
+`AbortController` at 150s, and errors that say what happened and that nothing was
+saved. On failure the wait line stays up carrying the reason, so the reason is in
+the dialog rather than only in a message box. The timeout is asserted to exceed the
+server's own `llm_timeout_seconds`, or it would abort requests the server is still
+legitimately working on. Thirteen browser checks drive the real dialog against a
+stubbed fetch, so it costs no provider calls.
+
+Also fixed: `--text` and `--text-dim` were referenced by `.ai-factline` and
+`.ai-warn-line` but never defined, so those rules resolved to nothing and inherited
+whatever colour the parent had.
+
+### Round of fixes after Stage 4
+
+Four complaints, plus one the last of them exposed.
+
+**Capitalised verbs were reported as invented proper nouns.** `Collaborated`,
+`Helped` and `Served` at the start of a bullet were all flagged, which made the fact
+guard cry wolf on the most ordinary sentences in a resume. The check is now positional
+instead of vocabulary-based: `_capitalised_candidates` skips any capitalised word in
+initial position, skips a curated `_NOT_A_PROPER_NOUN` set, and only reports a word
+that is not present in the user's own source text. A suffix rule (`-ed`/`-ing`) was
+considered and rejected — it would hide real tool names like Spring and Hibernate.
+
+**Dates are typed the way people speak.** `July 2026`, `Jul 2026`, `07/2026`,
+`2026`, `2026-07-15`, `Current`, `Now`, `Ongoing`, `Till date` all normalise on the
+way in, to `YYYY-MM` / `YYYY-MM-DD` / a bare year / `Present`, and are displayed in
+the template's own `date_style`. Ten bad forms are refused with a message that shows
+the accepted shapes instead of dumping JSON. Two implementations exist on purpose,
+`app/models.py:normalise_date` for the server and `EditorModel.normaliseDate` for the
+form, and a drift test compares their two tables both ways so they cannot diverge.
+
+**A refused write used to wipe the whole profile.** This is the serious one, and it
+was in `main` before this round. `History.push` stringifies whatever it is given, and
+all six call sites in `editor.js` were passing `JSON.stringify(state.profile)` — so the
+snapshot was a snapshot *of a string*. `undo` then parsed it back to a string and
+copied that string's characters into the profile as keys: 407 numeric keys where
+there should have been eleven sections. Any rejected write did this, silently. It
+stayed hidden until date validation started refusing half-typed dates on every
+keystroke, which made refused writes routine. Fixed at all six call sites (pass the
+profile object), pinned by a model-level rollback test, and pinned by name in
+`test_win95.py` so the double-stringify cannot come back.
+
+**Dates commit on blur, not per keystroke.** Two reasons, both learned the hard way:
+`Jul` on its way to `July 2019` is not a readable date, and normalising per character
+threw a message box at every character while rewriting the text under the caret. The
+keystroke pass is `quiet` — a rejected half-date rolls back without complaint — and
+the blur pass is the one that reports. The `input` listener has to stay on every
+field: removing it for dates looked fine until autosave stopped writing, because
+`setInput('start', '2022-07')` in the harness never reached the model.
+
+**Skills, tech and links are real lists.** One item per row with edit and remove,
+the group label rendered (`Languages: Python, SQL, Go`), duplicates dropped
+case-insensitively, and an edit that would collide with a different row is refused.
+Links are label plus URL in both Projects and Contact. `EditorModel.setItem`,
+`removeItem`, `splitLink`, `updateLink`, `removeLink`, `normaliseUrl` and friends; the
+UI rows are in `renderItemList` / `itemRow` / `renderLinks`.
+
+**The duplicated hint is gone.** "Add a bullet" and "Add item" printed their label and
+their hint, and the hint already included the label. `field()` gained `hideLabel`.
+
+**Every AI call now reports how long it took.** `elapsed_ms` / `total_ms` on
+`llm.ok`, `llm.parse_failed`, `llm.truncated` and `llm.http_error`; `spent_ms` on
+`llm.request`; `prompt_tokens` / `completion_tokens` on `llm.ok`; and `assist.attempt`
+/ `assist.done` around the whole operation, so one button press can be read off the log
+as a number of provider calls and a total. The stubbed run:
+`llm.truncated attempt=1 elapsed_ms=407` -> `llm.request attempt=2 spent_ms=407` ->
+`llm.truncated attempt=2 elapsed_ms=300 total_ms=707` -> `assist.done total_ms=920`
+with 3 provider calls for one press. That proves the plumbing and nothing about
+OpenRouter's real latency; the 80-second live run in the previous section is the only
+real figure so far.
+
+### Round two after Stage 4: a lost caret, one budget, one error reader
+
+**Typing one character lost focus.** The top-priority bug, and the browser check
+reproduced it exactly: `Contact/name` and `Summary` lost the caret on the first
+character, while `Experience/org` — the one field that forwarded every callback
+argument — held all nine keystrokes. That difference is the whole diagnosis.
+
+The cause was `applyFn`'s test, `if (redraw !== false)`. A rebuild replaces the input
+element, so the browser puts the caret on `BODY` and the next keystroke lands nowhere:
+a word cost one click per letter. `write()` passed `done` straight through as the
+`redraw` argument, and `done` is `undefined` for every callback written as
+`(v) => write(key, null, 'text', v)` — which is all of them except the list-entry
+field. `undefined !== false`, so "nobody said" was read as "yes, rebuild", per keystroke,
+on nearly every field in the app.
+
+Fixed by making the flag opt-in rather than opt-out: the test is now `redrawOk === true`,
+`apply()` coerces with `done === true`, and the seven writes that change the *shape* of a
+section (add/edit/remove a bullet, an item, a link) pass `true` on purpose. A forgotten
+flag is now safe instead of destructive. Pinned by
+`test_a_write_only_redraws_the_section_when_it_asks_to`, which asserts the guard cannot
+be loosened back and that every structural write asks; verified by mutating the guard to
+`!== false` and watching the test fail. The browser check types with real `keydown` +
+`input` events into a contact field, the multiline summary and a list-entry field, and
+asserts after every character that the same element still holds focus — plus that the
+words reached the server, since an input can hold a caret nobody wrote back.
+
+**One budget per button press.** `llm.ask` spent up to `MAX_ATTEMPTS` and
+`write_bullets` retried the whole call on top, so the worst case was their product —
+4 provider calls, the whole of the old cap, and growing one budget quietly doubled the
+other. `app/llm.CallBudget` is now one counter per press: `write_bullets` creates it and
+hands it to every `ask`, and `ask` charges it immediately before each HTTP request, so a
+truncated-reply retry costs the same as the first try. `MAX_CALLS_PER_PRESS` is 3,
+including that retry. Verified against a stub that never answers:
+`test_write_bullets_never_exceeds_three_calls_when_the_model_never_answers` counts the
+HTTP requests, and `test_the_budget_is_shared_not_merely_equal` proves it is one counter
+rather than two equal ones. Two mutants were tried — `ask` ignoring the budget it was
+given, and `write_bullets` creating a fresh one inside its loop — and both are caught.
+
+A spent budget raises `CallBudgetExhausted`, which is deliberately *not* an `LLMError`:
+every `except LLMError` here renders as "[provider/model] HTTP 4xx: what the provider
+said", which would invent both a culprit and a status code for something the provider
+never did. `app/main.py` catches it on both AI routes and passes the sentence through —
+including "Nothing was saved" — unchanged. That was found by the route test, after the
+budget already worked and the message would otherwise have arrived as "this app rejected
+the request. No further detail was returned."
+
+**`Present` is the open end, and there is one error reader.** `_as_range_point` sorts
+`Present` after every real date, so one comparison covers both ends of a range; a range
+that opens with the open end and closes on a real day is still refused, with a message
+that says which field to move where, because it is nearly always the two dates typed the
+wrong way round. The two `explainFailure` copies — one in `app.js`, one in `editor.js`,
+reporting the same 422 two different ways — now live in `app/static/win/failures.js`,
+DOM-free and driven for real by `tests/test_failures.py`. Adding the file to `index.html`
+broke the harness boot with `Cannot read properties of undefined`, because
+`tools/_verify.html` is a *third* copy of the page's script list; it is now pinned by
+`test_the_harness_page_loads_the_same_scripts_as_the_app`.
+
+603 tests pass (2 skipped without node on one path), 208 browser checks green,
+`tests/check_static.py` clean. No live calls; the count remains 5.
 
 ### Security pass (tests in `tests/test_security.py`)
 DNS rebinding closed with `TrustedHostMiddleware`; over-nested JSON (~6KB of `[`) caused a 500 + traceback, now 422; invisible/control characters (NUL, U+202E, zero-width, bidi isolates, BOM, DEL) rejected naming the code point; list fields capped 60/12/20. Security headers on every response with **two CSPs** — `default-src 'none'` for API routes, `default-src 'self'` for the page (the strict API policy would otherwise have blanked the UI). Exports sent `no-store`. Verified **not** vulnerable with tests: SQL injection (queries parameterised), CORS absent by design, no secret in any response.

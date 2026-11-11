@@ -47,12 +47,12 @@ def student_profile() -> Profile:
     return Profile.model_validate(
         {
             "contact": {
-                "name": "Dusht",
-                "email": "dusht@example.com",
+                "name": "Anon",
+                "email": "anon@example.com",
                 "phone": "+91 98765 43210",
                 "city": "Bengaluru",
                 "country": "India",
-                "links": [{"label": "GitHub", "url": "github.com/dusht"}],
+                "links": [{"label": "GitHub", "url": "example.org"}],
             },
             "summary": (
                 "Final-year Computer Science undergraduate at BITS Pilani with "
@@ -416,7 +416,7 @@ def _heavy_student() -> Profile:
     }
     return Profile.model_validate({
         "contact": {
-            "name": "Dusht", "email": "dusht@example.com",
+            "name": "Sample Applicant", "email": "anon@example.com",
             "phone": "+91 98765 43210", "city": "Bengaluru", "country": "India",
         },
         "summary": "Final-year CS undergraduate with backend experience in Python.",

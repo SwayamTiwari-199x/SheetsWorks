@@ -190,6 +190,51 @@ def test_the_autouse_fixture_clears_an_ambient_provider_key(
     )
 
 
+def test_the_suite_cannot_reach_a_provider_by_accident() -> None:
+    """The autouse guard is what makes "no live calls" a property, not a promise.
+
+    `test_the_400_that_the_user_saw_is_gone` posted a well-formed body to the live
+    provider on every suite run. conftest scrubs the API key, so it cost one real
+    HTTP request per run, got a 401 back, taught us nothing, and was only noticed
+    by counting `llm.request` lines in logs/llm.log by hand.
+
+    Asserted from inside the guard: this test is itself subject to it, so the
+    AssertionError below can only be raised by the patched connect.
+    """
+    import socket
+
+    s = socket.socket()
+    with pytest.raises(AssertionError) as err:
+        s.connect(("openrouter.ai", 443))
+    assert "openrouter.ai" in str(err.value)
+    assert "RUN_LIVE_LLM" in str(err.value), (
+        "the guard's message must say how to opt in, or it is a dead end"
+    )
+    s.close()
+
+
+def test_the_guard_still_lets_the_test_client_reach_the_app() -> None:
+    """Loopback is exempt, and TestClient needs it.
+
+    Blocking every connect broke every route test: the ASGI portal and the event
+    loop both touch 127.0.0.1. A provider call never goes there, so the exemption
+    is safe -- but it has to actually work, which is what this pins.
+    """
+    import socket
+
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    host, port = server.getsockname()
+    try:
+        client = socket.socket()
+        client.settimeout(5)
+        client.connect((host, port))          # must not raise
+        client.close()
+    finally:
+        server.close()
+
+
 @pytest.mark.parametrize("provider", ["gemini", "groq", "mistral", "anthropic"])
 def test_the_other_providers_say_nothing_about_their_model(provider: str) -> None:
     """`model_requirement` exists for openrouter. Every other provider must be

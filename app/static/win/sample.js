@@ -22,22 +22,20 @@
 function buildSample() {
   return {
     contact: {
-      name: 'Dusht Verma',
-      email: 'dusht@example.com',
-      phone: '+91 98765 43210',
-      city: 'Bengaluru',
-      country: 'India',
+      name: 'Anon',
+      email: 'anon@example.com',
+      phone: '555-0100',
+      city: '',
+      country: '',
       links: [
-        { label: 'GitHub', url: 'github.com/dusht' },
-        { label: 'LinkedIn', url: 'linkedin.com/in/dusht' },
+        { label: 'Website', url: 'example.org' },
       ],
     },
-    summary:
-      'Backend engineer with three years in Python and Postgres, most recently '
-      + 'owning the payment path for a staffing product used by 12 retail stores.',
-    // Only the sheets template prints this. Harmless in blank, and it means the
-    // sample shows off both formats without a second dataset.
-    interests: 'Trail running, chess, and rebuilding mechanical keyboards.',
+    summary: '',
+    // Obviously-not-a-real-person filler. The sheets template renders an
+    // Interests line, and an empty string leaves that layout path untested --
+    // but a real hobby list would be invented personal data.
+    interests: 'Sample hobby one, sample hobby two',
     education: [{
       institution: 'Sample Institute of Technology',
       degree: 'B.E. Computer Science',
@@ -51,7 +49,7 @@ function buildSample() {
       org: 'Sample Analytics',
       role: 'Backend Engineer',
       type: 'job',
-      location: 'Bengaluru',
+      location: '',
       start: '2022-07',
       end: 'Present',
       bullets: [
@@ -69,7 +67,7 @@ function buildSample() {
     projects: [{
       name: 'Shift Scheduler',
       role: 'Solo build',
-      links: [{ label: 'GitHub', url: 'github.com/dusht/scheduler' }],
+      links: [{ label: 'GitHub', url: 'example.org/scheduler' }],
       start: '2021-01',
       end: '2021-06',
       tech: ['FastAPI', 'PostgreSQL', 'Celery', 'Redis'],

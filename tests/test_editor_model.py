@@ -161,13 +161,13 @@ ok('grade has no stray "grade" key', g.grade === undefined);
 def test_a_link_appends_to_links_and_never_sets_a_scalar() -> None:
     passing("""
 const p = blank();
-p.contact.name = 'Dusht'; p.contact.email = 'd@example.com'; p.contact.phone = '12345';
-M.setField(p, 'contact', null, 'link', 'GitHub github.com/dusht');
+p.contact.name = 'Anon'; p.contact.email = 'anon@example.com'; p.contact.phone = '12345';
+M.setField(p, 'contact', null, 'link', 'GitHub example.org');
 ok('contact.links has one entry', p.contact.links.length === 1);
 ok('it has a label', p.contact.links[0].label === 'GitHub');
-ok('it has a url', p.contact.links[0].url === 'github.com/dusht');
+ok('it has a url', p.contact.links[0].url === 'example.org');
 ok('contact has no scalar link field', p.contact.link === undefined);
-M.setField(p, 'contact', null, 'link', 'LinkedIn linkedin.com/in/dusht');
+M.setField(p, 'contact', null, 'link', 'LinkedIn example.net');
 ok('a second link appends', p.contact.links.length === 2);
 throws(() => M.setField(p, 'contact', null, 'link', 'NoUrlHere'),
        'a link without a url is refused');
@@ -194,19 +194,25 @@ def test_every_declared_field_is_writable() -> None:
     passing("""
 const p = blank();
 p.education = [{ institution: 'S', start: '2019-08' }];
+/* Dates take a real date, because they are normalised on the way in -- see
+   test_dates_are_normalised_before_they_are_stored. */
+const vals = { start: '2019-08', end: 'Jul 2026' };
 ['institution', 'degree', 'field', 'start', 'end', 'notes'].forEach(function (f) {
-  M.setField(p, 'education', 1, f, 'v-' + f);
+  M.setField(p, 'education', 1, f, vals[f] || ('v-' + f));
 });
 ok('every education field took a value',
    p.education[0].institution === 'v-institution' &&
    p.education[0].notes === 'v-notes' && p.education[0].field === 'v-field');
+ok('and the dates normalised',
+   p.education[0].start === '2019-08' && p.education[0].end === '2026-07');
 
 p.certifications = [{ name: 'C' }];
 ['name', 'issuer', 'date', 'url', 'details'].forEach(function (f) {
-  M.setField(p, 'certifications', 1, f, 'v-' + f);
+  M.setField(p, 'certifications', 1, f, f === 'date' ? 'March 2024' : ('v-' + f));
 });
 ok('every certification field took a value',
    p.certifications[0].issuer === 'v-issuer' && p.certifications[0].details === 'v-details');
+ok('the certification date normalised', p.certifications[0].date === '2024-03');
 """)
 
 
@@ -287,11 +293,306 @@ ok('coursework stays plain strings',
 """)
 
 
+# --- dates ------------------------------------------------------------------
+
+
+def test_dates_are_normalised_before_they_are_stored() -> None:
+    """A field that rejects "July 2026" gets "July 2026" typed into it anyway,
+    and then tells the user to fix a value they believe is right."""
+    passing("""
+const p = blank();
+p.experience = [{ org: 'X', role: 'Y', type: 'job', start: '', end: null, bullets: [] }];
+const forms = {
+  'July 2026': '2026-07', 'july 2026': '2026-07', 'Jul 2026': '2026-07',
+  'JUL 2026': '2026-07', 'Jul-2026': '2026-07', 'Jul. 2026': '2026-07',
+  'July, 2026': '2026-07', 'Sept 2026': '2026-09', 'Sep 2026': '2026-09',
+  'Apr 2024': '2024-04', '  July 2026  ': '2026-07', 'Dec 2025.': '2025-12',
+  '07/2026': '2026-07', '7/2026': '2026-07', '2026-07': '2026-07',
+  '2026/7': '2026-07', '2026.07': '2026-07', '2026 July': '2026-07',
+  '2026-07-15': '2026-07-15', '15/07/2026': '2026-07-15',
+};
+Object.keys(forms).forEach(function (typed) {
+  M.setField(p, 'experience', 1, 'start', typed);
+  ok('"' + typed + '" stores as ' + forms[typed],
+     p.experience[0].start === forms[typed], p.experience[0].start);
+});
+""")
+
+
+def test_a_bare_year_stays_a_year() -> None:
+    """Storing 2026 as 2026-01 would print a month the user never wrote."""
+    passing("""
+const p = blank();
+p.education = [{ institution: 'S', start: '' }];
+M.setField(p, 'education', 1, 'start', '2019');
+ok('a year is not a January', p.education[0].start === '2019', p.education[0].start);
+""")
+
+
+def test_every_word_for_still_working_stores_the_same_thing() -> None:
+    """Otherwise one resume ends up saying "Current - Ongoing"."""
+    passing("""
+const p = blank();
+p.experience = [{ org: 'X', role: 'Y', type: 'job', start: '2024-01', end: null, bullets: [] }];
+['Current', 'current', 'Now', 'Ongoing', 'Till date', 'till date', 'to date',
+ 'Present', 'currently', 'Till now', 'to present', 'ongoing.'].forEach(function (w) {
+  M.setField(p, 'experience', 1, 'end', w);
+  ok('"' + w + '" is one stored value', p.experience[0].end === 'Present',
+     p.experience[0].end);
+});
+""")
+
+
+def test_a_date_the_user_cannot_have_meant_is_refused_with_advice() -> None:
+    passing("""
+const p = blank();
+p.education = [{ institution: 'S', start: '' }];
+['soon', 'next month', 'Julyy 2026', '13/2026', '31/02/2026', '202607',
+ '2026-13', '29/02/2025'].forEach(function (bad) {
+  throws(() => M.setField(p, 'education', 1, 'start', bad),
+         '"' + bad + '" is refused rather than guessed at');
+});
+ok('and nothing was stored', p.education[0].start === '', p.education[0].start);
+""")
+
+
+def test_the_date_error_says_what_to_type_not_where_the_field_is() -> None:
+    """"body.experience.0.start" means nothing to the person looking at it. The
+    message has to name a form, not a JSON path."""
+    log = passing("""
+const p = blank();
+p.education = [{ institution: 'S', start: '' }];
+try { M.setField(p, 'education', 1, 'start', 'soon'); }
+catch (e) { console.log('MESSAGE:' + e.message); }
+""")
+    assert "'soon'" in log
+    assert "2026-07" in log, "the message must show an accepted form"
+    assert "Present" in log, "and the word for an ongoing role"
+    assert "body." not in log
+
+
+def test_an_unreadable_date_found_in_data_is_reported_against_its_entry() -> None:
+    """Sample data, a paste or an older build can put a date in that setField
+    never saw. Validate() is the last place before the save that fails."""
+    passing("""
+const p = blank();
+p.experience = [
+  { org: 'X', role: 'Y', type: 'job', start: '2024-01', end: null, bullets: [] },
+  { org: 'Z', role: 'W', type: 'job', start: 'whenever', end: null, bullets: [] },
+];
+const problems = M.validate(p);
+const dates = problems.filter(function (x) { return x.message.indexOf('is not a date') !== -1; });
+ok('the bad date is reported', dates.length === 1, JSON.stringify(problems));
+ok('against the entry that has it', dates[0].where === 'Experience 2', dates[0].where);
+ok('in a sentence naming the value', dates[0].message.indexOf('whenever') !== -1,
+   dates[0].message);
+""")
+
+
+def test_a_rejected_write_rolls_back_to_the_profile_it_had() -> None:
+    """Every write snapshots the profile first so a refused write can be undone.
+    History.push does the stringifying itself, so the snapshot has to be handed
+    over as the profile object. Given a string instead, undo restores that
+    string's characters as keys and every section vanishes -- which is exactly
+    what happened, silently, on the first rejected write of a session.
+    """
+    log = passing("""
+const p = blank();
+p.contact.name = 'Anon';
+p.education.push({ id: 'a', institution: 'I', degree: 'B', field: 'CS',
+                   start: '2019-08', end: '2022-06',
+                   grade: { value: '8.7', scale: '10' }, coursework: [], notes: '',
+                   bullets: [] });
+
+const h = new M.History();
+h.push(p);
+throws(function () { M.setField(p, 'education', 1, 'start', 'nonsense'); },
+       'nonsense is refused');
+h.undo(p);
+ok('the entry survives the rollback', !!p.education && p.education.length === 1,
+   'education has ' + (p.education ? p.education.length : 'no key'));
+ok('so does every other section', Object.keys(p).length > 5,
+   Object.keys(p).length + ' keys');
+ok('and the other fields are untouched', p.contact.name === 'Anon', p.contact.name);
+ok('the date is back to what it was', p.education[0].start === '2019-08',
+   p.education[0].start);
+
+const q = blank();
+q.education.push({ id: 'b', start: '2019-08' });
+const h2 = new M.History();
+h2.push(q);
+throws(function () { M.setField(q, 'education', 1, 'start', 'J'); },
+       'half a date is refused');
+h2.undo(q);
+ok('a refused date does not take the profile with it', q.education.length === 1,
+   'education has ' + q.education.length);
+""")
+
+
+def test_the_two_date_tables_cannot_drift_apart() -> None:
+    """models.normalise_date and EditorModel.normaliseDate are written twice on
+    purpose -- once for the server, once so the form can show what it stored.
+    Two copies drift unless something compares them, so this does."""
+    log = passing("""
+console.log('MONTHS:' + Object.keys(M.DATE_MONTHS).map(
+  function (k) { return k + '=' + M.DATE_MONTHS[k]; }).join(','));
+console.log('PRESENT:' + M.PRESENT_WORDS.slice().sort().join(','));
+""")
+    js_months = dict(
+        pair.split("=") for pair in
+        log.split("MONTHS:", 1)[1].split("\n", 1)[0].strip().split(",")
+    )
+    js_present = set(log.split("PRESENT:", 1)[1].split("\n", 1)[0].strip().split(","))
+
+    from app.models import _MONTH_NAMES, PRESENT_WORDS
+
+    assert {k: int(v) for k, v in js_months.items()} == _MONTH_NAMES, (
+        "the browser and the server disagree about which words are months"
+    )
+    # PRESENT_WORDS carries a couple of punctuation variants on purpose; what
+    # matters is that every word the browser accepts the server also accepts.
+    missing = sorted(w for w in js_present if w.strip(" .") not in PRESENT_WORDS)
+    assert not missing, f"the browser accepts these but the server does not: {missing}"
+
+
 def test_appending_nothing_is_refused() -> None:
     passing("""
 const p = blank();
 p.skills = [{ name: 'B', items: [] }];
 throws(() => M.setField(p, 'skills', 1, 'item', ''), 'an empty append is refused');
+""")
+
+
+# --- lists with rows: skills, tech, coursework, links ----------------------
+
+
+def test_a_list_item_can_be_edited_and_removed_where_it_stands() -> None:
+    """The whole point of the change. Before this, a typo in "Pythno" could only
+    be fixed by deleting the whole group and retyping every item, because the
+    list was one append-only text line."""
+    passing("""
+const p = blank();
+p.skills = [{ name: 'Backend', items: ['Python', 'Pythno', 'FastAPI'] }];
+M.setItem(p, 'skills', 1, 'item', 2, 'Postgres');
+ok('the edited row changed in place',
+   JSON.stringify(p.skills[0].items) === '["Python","Postgres","FastAPI"]',
+   JSON.stringify(p.skills[0].items));
+M.removeItem(p, 'skills', 1, 'item', 1);
+ok('removing shifts the rest down',
+   JSON.stringify(p.skills[0].items) === '["Postgres","FastAPI"]',
+   JSON.stringify(p.skills[0].items));
+""")
+
+
+def test_a_list_never_ends_up_printing_the_same_item_twice() -> None:
+    """"Python, Python" reads as one skill to a person and as two to an ATS that
+    counts tokens. Case is the only difference that matters here."""
+    passing("""
+const p = blank();
+p.skills = [{ name: 'Backend', items: ['Python', 'FastAPI'] }];
+throws(() => M.setField(p, 'skills', 1, 'item', 'python'),
+       'a case-different duplicate is refused when adding');
+throws(() => M.setField(p, 'skills', 1, 'item', '  Python  '),
+       'whitespace does not make a new item');
+throws(() => M.setItem(p, 'skills', 1, 'item', 2, 'PYTHON'),
+       'an edit cannot create the duplicate that adding refuses');
+ok('and the list is untouched',
+   JSON.stringify(p.skills[0].items) === '["Python","FastAPI"]',
+   JSON.stringify(p.skills[0].items));
+""")
+
+
+def test_a_list_refuses_edits_that_would_empty_or_escape_it() -> None:
+    passing("""
+const p = blank();
+p.skills = [{ name: 'Backend', items: ['Python'] }];
+throws(() => M.setItem(p, 'skills', 1, 'item', 1, '   '),
+       'blanking a row is refused, because it would print as a gap');
+throws(() => M.setItem(p, 'skills', 1, 'item', 9, 'Go'),
+       'editing a row that does not exist is refused');
+throws(() => M.removeItem(p, 'skills', 1, 'item', 0),
+       'removing row zero is refused');
+throws(() => M.removeItem(p, 'skills', 1, 'item', 2),
+       'removing one row past the end is refused');
+throws(() => M.listOf(p, 'projects', 1, 'item'),
+       'a section with no such list is refused by name');
+""")
+
+
+def test_tech_and_coursework_are_editable_lists_too() -> None:
+    passing("""
+const p = blank();
+p.projects = [{ name: 'P', links: [], tech: ['Redis', 'Kafka'], bullets: [] }];
+M.setItem(p, 'projects', 1, 'tech', 2, 'NATS');
+ok('project tech is editable', p.projects[0].tech[1] === 'NATS', p.projects[0].tech[1]);
+M.removeItem(p, 'projects', 1, 'tech', 1);
+ok('and removable', JSON.stringify(p.projects[0].tech) === '["NATS"]');
+
+p.education = [{ institution: 'S', start: '2019-08', coursework: ['DBs', 'OS'] }];
+M.setItem(p, 'education', 1, 'coursework', 1, 'Distributed Systems');
+ok('coursework is editable', p.education[0].coursework[0] === 'Distributed Systems');
+""")
+
+
+def test_the_group_label_shows_exactly_what_will_be_printed() -> None:
+    passing("""
+const p = blank();
+p.skills = [{ name: 'Languages', items: ['Python', 'SQL', 'Go'] }];
+ok('the printed line is name: items',
+   M.groupLabel(p.skills[0]) === 'Languages: Python, SQL, Go',
+   M.groupLabel(p.skills[0]));
+p.skills.push({ name: 'Tools', items: [] });
+ok('an empty group is just its name', M.groupLabel(p.skills[1]) === 'Tools');
+""")
+
+
+def test_a_link_is_a_label_and_a_url_you_can_both_edit() -> None:
+    """Two half-fields, not one "label url" box. Splitting on the first space
+    turned "My GitHub" into the label "My" and the url "GitHub ..."."""
+    passing("""
+const p = blank();
+M.setField(p, 'contact', null, 'link', { label: 'My GitHub', url: 'github.com/me' });
+ok('the label kept both words', p.contact.links[0].label === 'My GitHub',
+   p.contact.links[0].label);
+M.updateLink(p.contact, 1, { label: 'GitHub', url: 'https://github.com/me/' });
+ok('and the url was corrected',
+   p.contact.links[0].url === 'https://github.com/me/', p.contact.links[0].url);
+throws(() => M.updateLink(p.contact, 1, { label: 'GitHub', url: '' }),
+       'a link with no url is refused');
+throws(() => M.updateLink(p.contact, 1, { label: '', url: 'github.com/me' }),
+       'a link with no label is refused');
+""")
+
+
+def test_the_same_url_twice_is_refused_however_it_is_spelled() -> None:
+    """Scheme, www., case and a trailing slash are all ways of writing the same
+    address. Printing it three times reads as carelessness and gives an ATS the
+    same token three times."""
+    passing("""
+const p = blank();
+M.setField(p, 'contact', null, 'link', { label: 'GitHub', url: 'github.com/me' });
+throws(() => M.setField(p, 'contact', null, 'link',
+       { label: 'Profile', url: 'https://GitHub.com/me/' }),
+       'the same destination with a different spelling is refused');
+ok('and only one link exists', p.contact.links.length === 1);
+M.setField(p, 'contact', null, 'link', { label: 'LinkedIn', url: 'linkedin.com/in/me' });
+ok('a different url is fine', p.contact.links.length === 2);
+""")
+
+
+def test_project_links_are_edited_through_the_project() -> None:
+    passing("""
+const p = blank();
+p.projects = [{ name: 'P', links: [], tech: [], bullets: [] }];
+const owner = M.linkOwner(p, 'projects', 1);
+M.addLink(owner, { label: 'Repo', url: 'github.com/x/y' });
+ok('the project link landed on the project',
+   p.projects[0].links[0].url === 'github.com/x/y');
+M.updateLink(M.linkOwner(p, 'projects', 1), 1, { label: 'Code', url: 'github.com/x/y' });
+ok('and can be renamed', p.projects[0].links[0].label === 'Code');
+M.removeLink(M.linkOwner(p, 'projects', 1), 1);
+ok('and removed', p.projects[0].links.length === 0);
+ok('contact links are untouched by a project edit', p.contact.links.length === 0);
 """)
 
 
@@ -304,7 +605,7 @@ const p = blank();
 ok('a blank profile fills nothing', M.filled(p).length === 0);
 ok('and is missing everything', M.missing(p).length === M.ORDER.length);
 
-p.contact.name = 'Dusht';
+p.contact.name = 'Anon';
 ok('a half-filled contact counts as filled', M.count(p, 'contact') === 1);
 ok('but summary is still empty', M.count(p, 'summary') === 0);
 
@@ -328,14 +629,14 @@ ok('a blank contact is a problem', M.validate(p).length >= 3, M.validate(p).leng
 ok('and it names the missing field',
    /needs a name/.test(M.validate(p)[0].message), M.validate(p)[0].message);
 
-p.contact.name = 'Dusht'; p.contact.email = 'd@example.com'; p.contact.phone = '12345';
+p.contact.name = 'Anon'; p.contact.email = 'anon@example.com'; p.contact.phone = '12345';
 ok('a complete contact passes', M.validate(p).length === 0,
    JSON.stringify(M.validate(p)));
 
 p.contact.email = 'not-an-email';
 ok('a bad email is caught', M.validate(p).length === 1);
 
-p.contact.email = 'd@example.com';
+p.contact.email = 'anon@example.com';
 p.experience = [{ org: 'X', role: 'Y', type: 'nonsense', start: '2022-01', bullets: [] }];
 ok('a bad experience type is caught', M.validate(p).length === 1,
    M.validate(p)[0].message);
@@ -363,8 +664,8 @@ const h = new M.History();
 ok('nothing to undo at the start', h.canUndo() === false);
 throws(() => h.undo(p), 'undoing an empty history explains itself');
 
-p.contact.name = 'Dusht';
-p.contact.email = 'd@example.com';
+p.contact.name = 'Anon';
+p.contact.email = 'anon@example.com';
 p.contact.phone = '12345';
 h.push(p);
 const before = JSON.stringify(p);
@@ -376,7 +677,7 @@ ok('the profile changed', JSON.stringify(p) !== before);
 h.undo(p);
 ok('undo restored it exactly', JSON.stringify(p) === before,
    JSON.stringify(p).slice(0, 120));
-ok('and it kept the same object identity', p.contact.name === 'Dusht');
+ok('and it kept the same object identity', p.contact.name === 'Anon');
 ok('undo is not repeatable past the start', (function () {
   try { h.undo(p); return false; } catch (e) { return true; }
 })());
@@ -453,9 +754,9 @@ const p = blank();
  'achievements', 'extracurriculars', 'publications'].forEach(function (s) {
   p[s] = [M.blankEntry(s)];
 });
-p.contact = { name: 'Dusht Verma', email: 'dusht@example.com',
+p.contact = { name: 'Anon', email: 'anon@example.com',
               phone: '+91 98765 43210', city: 'Bengaluru', country: 'India',
-              links: [{ label: 'GitHub', url: 'github.com/dusht' }] };
+              links: [{ label: 'GitHub', url: 'example.org' }] };
 p.summary = 'x'; p.interests = 'y';
 p.experience[0].org = 'X'; p.experience[0].role = 'Y';
 p.experience[0].start = '2022-01'; p.experience[0].end = 'Present';
@@ -484,9 +785,9 @@ def test_the_model_writes_shapes_the_api_accepts() -> None:
 
     result = run("""
 const p = blank();
-p.contact = { name: 'Dusht Verma', email: 'dusht@example.com',
+p.contact = { name: 'Sample Applicant', email: 'anon@example.com',
               phone: '+91 98765 43210', city: 'Bengaluru', country: 'India',
-              links: [{ label: 'GitHub', url: 'github.com/dusht' }] };
+              links: [{ label: 'GitHub', url: 'example.org' }] };
 p.summary = 'Backend engineer.';
 p.interests = 'Chess.';
 p.education = [M.blankEntry('education')];
@@ -507,7 +808,7 @@ p.experience[0].end = 'Present';
 M.setField(p, 'experience', 1, 'bullet', 'Cut p99 latency | 900ms -> 240ms');
 M.setField(p, 'projects', 1, 'name', 'Shift Scheduler');
 M.setField(p, 'projects', 1, 'tech', 'FastAPI');
-M.setField(p, 'projects', 1, 'link', 'GitHub github.com/dusht');
+M.setField(p, 'projects', 1, 'link', 'GitHub example.org');
 M.setField(p, 'skills', 1, 'name', 'Backend');
 M.setField(p, 'skills', 1, 'item', 'Python');
 p.certifications[0].name = 'AWS Associate';
@@ -538,7 +839,7 @@ console.log('PAYLOAD:' + JSON.stringify(p));
         assert back["skills"][0]["items"] == ["Python"]
 
         # And it must render.
-        snap = c.post("/versions/from-profile?name=Dusht%20Verma&template=sheets")
+        snap = c.post("/versions/from-profile?name=Sample%20Applicant&template=sheets")
         assert snap.status_code == 201, snap.text[:400]
         for fmt, floor in (("pdf", 2000), ("docx", 2000), ("txt", 200)):
             e = c.post(f"/export/{snap.json()['id']}?format={fmt}")

@@ -12,6 +12,7 @@ Project: personal AI resume builder (single user, runs locally). Full vision is 
 7. Do not add dependencies without listing them and why. Prefer the standard library and the stack in `SPEC.md`.
 8. Do not spend effort on visual polish. Plain, functional UI only.
 9. Secrets (API keys) live in `.env`, never in code or commits.
+10. Reply to my numbered asks by number. For each: "DONE" plus evidence (command output, test name, or file:line), or "NOT DONE" plus the reason. No other content. Anything not in my numbered asks goes in `BACKLOG.md`, not code.
 
 ## Non-negotiable design rules (also in SPEC.md)
 - The LLM only produces TEXT FIELDS inside structured JSON. It never writes LaTeX, HTML, or layout.

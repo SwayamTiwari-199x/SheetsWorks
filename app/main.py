@@ -64,13 +64,40 @@ COMMON_SECURITY_HEADERS = {
 }
 
 # Resume fields are length-capped, but a deeply nested JSON body is not a length
-# problem: ~6KB of "[" trips Python's recursion limit inside pydantic's error
-# reporting, which raises RecursionError and surfaces as a 500 with a traceback.
-# Catch it and answer like any other bad request.
+# problem: ~6KB of "[" trips Python's recursion limit while the body is decoded.
+# FastAPI 0.162 already turns that into a 400 "error parsing the body"; this
+# handler is the backstop for any RecursionError that escapes routing, so the
+# caller never sees a 500 with a traceback.
 RECURSION_MESSAGE = (
     "request body is nested too deeply to validate; "
     "send a normal JSON object instead"
 )
+
+
+def _provider_detail(exc: Exception) -> str:
+    """Render a failure as one sentence for the caller.
+
+    The provider's own message is the useful part -- it names the field it
+    rejected -- so it goes first and the status follows. The key is already
+    redacted by app.llm before the error reaches here.
+
+    `CallBudgetExhausted` is not a provider failure and is rendered as its own
+    message: it has no status and nothing to quote, so the general rendering
+    below would have reported "this app rejected the request. No further detail
+    was returned." -- dropping the two facts the reader needs, which calls were
+    spent and that nothing was saved. Both AI routes reach this through their
+    own `except CallBudgetExhausted`, which is what routes them here.
+    """
+    detail = getattr(exc, "detail", "") or ""
+    status = getattr(exc, "status_code", None)
+    provider = getattr(exc, "provider", "") or "the provider"
+    head = f"{provider} rejected the request"
+    if status:
+        head += f" (HTTP {status})"
+    if detail:
+        return f"{head}: {detail}"
+    return f"{head}. No further detail was returned."
+
 
 # Request paths are attacker-controlled and %0A decodes to a newline, so an
 # unsanitised path in a log line would let a caller forge log entries.
@@ -247,6 +274,24 @@ def create_version(version: Version) -> Version:
     return Version.model_validate(db.put_version(version.model_dump(mode="json")))
 
 
+def _refuse_placeholder_name(profile: Profile) -> None:
+    """Refuse to snapshot an export while the name is still the placeholder.
+
+    The refusal lives here as well as on /export, because the export flow is
+    snapshot-then-export: checking only at export time meant a failed export
+    left a stored version behind, and the File Manager's version list grew one
+    row per attempt. Nothing is written, so a refused attempt leaves no trace.
+    """
+    if (profile.contact.name or "").strip() == "Anon":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Cannot export: the profile name is still 'Anon'. "
+                "Edit the name in My Resume first."
+            ),
+        )
+
+
 @app.post("/versions/from-profile", response_model=Version, status_code=201)
 def snapshot_current_profile(
     name: str = "current",
@@ -257,9 +302,11 @@ def snapshot_current_profile(
     stored = db.get_profile(PROFILE_ID)
     if stored is None:
         raise HTTPException(status_code=404, detail="no profile yet; PUT /profile first")
+    profile = Profile.model_validate(stored)
+    _refuse_placeholder_name(profile)
     version = Version(
         name=name,
-        profile_snapshot=Profile.model_validate(stored),
+        profile_snapshot=profile,
         include_personal_details=include_personal_details,
         template=template,
     )
@@ -289,6 +336,11 @@ def export_version(
         raise HTTPException(status_code=404, detail=f"version {version_id} not found")
     version = Version.model_validate(stored)
     doc = build_doc_from_version(version)
+
+    # Refuse while the name is still the placeholder. /versions/from-profile
+    # already refuses, so this is the backstop for a version stored by POST
+    # /versions or written before the rule existed.
+    _refuse_placeholder_name(version.profile_snapshot)
 
     limit = _page_limit_for(doc, version.template)
     headers = {
@@ -399,6 +451,51 @@ def _export_filename(version, fmt: str) -> str:
     return _clean_filename(rendered)
 
 
+# `/assist/answer` is declared BEFORE `/assist/{section}` on purpose.
+#
+# FastAPI matches routes in declaration order, and a path parameter matches any
+# single segment -- including the literal string "answer". With the parameter
+# route first, POST /assist/answer was bound to assist_extract with
+# section="answer", which then complained "free_text is required" and returned
+# 400 for a request that had perfectly good facts in it. The literal route has
+# to come first, or it has to not look like a path parameter at all.
+@app.post("/assist/answer")
+def assist_answer(body: dict) -> dict:
+    """Polish facts into bullets.
+
+    Body: {"section": "experience", "facts": "...", "answers": "..."}
+    Returns: {"bullets": [{"text": ..., "facts": [ids]}], "numbered_facts": [...],
+              "unused_facts": [...], "reused_metrics": [...]}
+
+    A bad body is a 400. A provider failure is a 502 carrying the provider's
+    own message, because the caller sent a well-formed request and something
+    outside this app went wrong -- "HTTP 400" told the user nothing about which.
+    """
+    from .assist import write_bullets
+    from .llm import CallBudgetExhausted, LLMError
+
+    section = body.get("section", "")
+    raw_facts = body.get("facts", "")
+    answers = body.get("answers", "")
+    if not section:
+        raise HTTPException(status_code=400, detail="section is required")
+    if not raw_facts.strip():
+        raise HTTPException(status_code=400, detail="facts is required")
+    try:
+        result = write_bullets(section, raw_facts, answers)
+    except ValueError as exc:
+        # Scope errors only: an unsupported section is the caller's mistake.
+        raise HTTPException(status_code=400, detail=str(exc))
+    except CallBudgetExhausted as exc:
+        # A 502, because the request was fine and something outside the caller's
+        # control stopped it -- but not dressed up as a provider refusal. The
+        # sentence is already written for a person and says what happened.
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except LLMError as exc:
+        raise HTTPException(status_code=502, detail=_provider_detail(exc)) from exc
+    return result.model_dump()
+
+
 @app.post("/assist/{section}")
 def assist_extract(section: str, body: dict) -> dict:
     """Extract structured entries + follow-up questions from free text.
@@ -407,6 +504,7 @@ def assist_extract(section: str, body: dict) -> dict:
     Returns: {"entries": [...], "questions": [...]}
     """
     from .assist import ask_clarifying
+    from .llm import CallBudgetExhausted, LLMError
 
     free_text = body.get("free_text", "")
     if not free_text.strip():
@@ -415,27 +513,8 @@ def assist_extract(section: str, body: dict) -> dict:
         result = ask_clarifying(section, free_text)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    return result.model_dump()
-
-
-@app.post("/assist/answer")
-def assist_answer(body: dict) -> dict:
-    """Polish facts into bullets.
-
-    Body: {"section": "experience", "raw_facts": "...", "answers": "..."}
-    Returns: {"bullets": ["...", "..."]}
-    """
-    from .assist import write_bullets
-
-    section = body.get("section", "")
-    raw_facts = body.get("facts", "")
-    answers = body.get("answers", "")
-    if not section:
-        raise HTTPException(status_code=400, detail="section is required")
-    if not raw_facts.strip():
-        raise HTTPException(status_code=400, detail="raw_facts is required")
-    try:
-        result = write_bullets(section, raw_facts, answers)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+    except CallBudgetExhausted as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except LLMError as exc:
+        raise HTTPException(status_code=502, detail=_provider_detail(exc)) from exc
     return result.model_dump()

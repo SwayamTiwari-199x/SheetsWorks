@@ -495,7 +495,7 @@ def test_nosniff_on_everything() -> None:
 def test_preview_renders_the_sent_profile() -> None:
     with TestClient(app) as c:
         r = c.post("/preview", json={
-            "contact": {"name": "Dusht", "email": "a@b.com", "phone": "12345"},
+            "contact": {"name": "Anon", "email": "a@b.com", "phone": "12345"},
             "summary": "Engineer.",
             "experience": [{
                 "org": "PayFlow", "role": "Backend", "start": "2022-01", "end": "Present",
